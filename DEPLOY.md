@@ -41,16 +41,21 @@ APP_URL=https://foodtruck.businessfalkenberg.se
 NEXT_PUBLIC_APP_URL=https://foodtruck.businessfalkenberg.se
 DIRECTUS_URL=https://cms.businessfalkenberg.se
 NEXT_PUBLIC_DIRECTUS_URL=https://cms.businessfalkenberg.se
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=AIzaSyAeQYmStP2N-9VgmMpNcNVkzl1GV6HC8JM
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=<the foodtruck-maps-js key — see note below>
 NEXT_PUBLIC_GOOGLE_MAP_ID=DEMO_MAP_ID
 EOF
 ```
 
-⚠️ **Google Maps key:** this is Paul's key from `~/.env.secrets`. For the map to
-render, the key's *HTTP referrer restrictions* in Google Cloud Console
-(APIs & Services → Credentials) must include `foodtruck.businessfalkenberg.se/*`.
-Everything except the map works without this. (Frej's original prod key was not
-retrievable — it lives only in his Vercel project.)
+🔑 **Google Maps key:** use the `foodtruck-maps-js` key created in the
+`falkenbergcloud` Google Cloud project (Maps Platform → Keys & credentials).
+It is hard-restricted and safe to be public in the client bundle:
+- Application restriction: HTTP referrer `https://foodtruck.businessfalkenberg.se/*`
+- API restriction: Maps JavaScript API only
+- Quota cap: Maps JavaScript API "Map loads per day" = 1,000 (hard stop vs runaway cost)
+
+The live value is already in `~/foodtruck/.env` on the VPS. It is intentionally
+NOT committed here (this repo is public). If you ever need it, read it from the
+VPS `.env` or the Cloud Console key. The map will not render until this is set.
 
 ## Step 3 — build & run the container
 
