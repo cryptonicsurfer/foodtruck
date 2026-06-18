@@ -49,10 +49,13 @@ EnvProvider → QueryProvider → AuthProvider → MapsProvider
 - Each booking links one food truck to one space for a time period
 
 ### Deployment
-- Hosted on **Vercel** under Frej Andreassen's account (`frejandreassen`)
-- Production URL: `foodtruck-zeta.vercel.app`
-- Deploys from `frejandreassen/foodtruck` repo (origin) — our fork is `cryptonicsurfer/foodtruck`
-- To deploy changes: create PR from fork to origin/main, ask Frej to merge
+- Self-hosted on the **`glsfbg` VPS** in Docker behind Caddy (migrated off
+  Frej's Vercel 2026-06-18). See `DEPLOY.md` for the full runbook.
+- Production URL: `https://foodtruck.businessfalkenberg.se`
+- Container `foodtruck`, host `127.0.0.1:3009` → container `:3000`
+- Deploys from `cryptonicsurfer/foodtruck` → `main`
+- To deploy changes: `ssh -A glsfbg && cd ~/foodtruck && git pull && docker compose up -d --build`
+- Old Vercel deploy (`foodtruck-zeta.vercel.app`) is orphaned — no DNS points to it.
 
 ### Environment Variables
 - `DIRECTUS_URL` / `NEXT_PUBLIC_DIRECTUS_URL` - Directus backend URL

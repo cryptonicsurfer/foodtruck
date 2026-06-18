@@ -219,6 +219,9 @@ export default function BookingPage() {
 
   const isSpaceBooked = (spaceId: string, timeSlot: { start: string, end: string }) => {
     if (!bookings || !bookings.length) return false;
+    // Guard against malformed time slots (null/missing start or end) so a single
+    // bad slot in Directus can't crash the whole booking page.
+    if (!timeSlot || !timeSlot.start || !timeSlot.end) return false;
 
     const formatTimeString = (timeStr: string) => {
       return timeStr.includes(':') ? timeStr.split(':').slice(0, 2).join(':') : timeStr;
@@ -265,6 +268,8 @@ export default function BookingPage() {
   // Get booking details for a space and time slot
   const getBookingDetails = (spaceId: string, timeSlot: { start: string, end: string }) => {
     if (!bookings || !bookings.length) return null;
+    // Guard against malformed time slots (null/missing start or end).
+    if (!timeSlot || !timeSlot.start || !timeSlot.end) return null;
 
     const formatTimeString = (timeStr: string) => {
       return timeStr.includes(':') ? timeStr.split(':').slice(0, 2).join(':') : timeStr;
@@ -321,6 +326,8 @@ export default function BookingPage() {
   // Check if a specific space and time slot is blocked
   const isSlotBlocked = (spaceId: string | number, timeSlot: { start: string }): { blocked: boolean; reason?: string } => {
     if (!date || !blockedDates.length) return { blocked: false }
+    // Guard against malformed time slots (null/missing start).
+    if (!timeSlot || !timeSlot.start) return { blocked: false }
 
     const dateStr = format(date, 'yyyy-MM-dd')
     const slotStartHour = parseInt(timeSlot.start.split(':')[0])
@@ -391,7 +398,8 @@ export default function BookingPage() {
     
     try {
       // Format of time_slots can be "08:00:00" or "08:00"
-      const formatTimeString = (timeStr: string) => {
+      const formatTimeString = (timeStr: string | null | undefined) => {
+        if (!timeStr) return ''
         return timeStr.includes(':') ? timeStr.split(':').slice(0, 2).join(':') : timeStr
       }
       
@@ -692,9 +700,10 @@ export default function BookingPage() {
                                             // Check if we're at max bookings
                                             if (bookingRules && futureBookings >= bookingRules.maximum_future_bookings) {
                                               const bookingStartDate = new Date(date || new Date());
-                                              const formattedStart = timeSlotWithId.start.includes(':') ? 
-                                                timeSlotWithId.start.split(':').slice(0, 2).join(':') : 
-                                                timeSlotWithId.start;
+                                              const safeStart = timeSlotWithId.start || '00:00';
+                                              const formattedStart = safeStart.includes(':') ?
+                                                safeStart.split(':').slice(0, 2).join(':') :
+                                                safeStart;
                                               
                                               const [startHours, startMinutes] = formattedStart.split(':').map(num => parseInt(num));
                                               bookingStartDate.setHours(startHours, startMinutes, 0, 0);
@@ -714,9 +723,10 @@ export default function BookingPage() {
                                             // Check if we're at max bookings
                                             if (bookingRules && futureBookings >= bookingRules.maximum_future_bookings) {
                                               const bookingStartDate = new Date(date || new Date());
-                                              const formattedStart = timeSlotWithId.start.includes(':') ? 
-                                                timeSlotWithId.start.split(':').slice(0, 2).join(':') : 
-                                                timeSlotWithId.start;
+                                              const safeStart = timeSlotWithId.start || '00:00';
+                                              const formattedStart = safeStart.includes(':') ?
+                                                safeStart.split(':').slice(0, 2).join(':') :
+                                                safeStart;
                                               
                                               const [startHours, startMinutes] = formattedStart.split(':').map(num => parseInt(num));
                                               bookingStartDate.setHours(startHours, startMinutes, 0, 0);

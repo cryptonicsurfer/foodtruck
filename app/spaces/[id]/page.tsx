@@ -136,6 +136,8 @@ export default function SpaceDetailsPage() {
   // Check if a time slot is booked for the current space
   const isTimeSlotBooked = (timeSlot: any) => {
     if (!bookings || !bookings.length || !space) return false
+    // Guard against malformed time slots (null/missing start or end).
+    if (!timeSlot || !timeSlot.start || !timeSlot.end) return false
 
     const formatTimeString = (timeStr: string) => {
       return timeStr.includes(':') ? timeStr.split(':').slice(0, 2).join(':') : timeStr
@@ -183,6 +185,8 @@ export default function SpaceDetailsPage() {
   // Get booking details for a time slot
   const getBookingDetails = (timeSlot: any) => {
     if (!bookings || !bookings.length || !space) return null
+    // Guard against malformed time slots (null/missing start or end).
+    if (!timeSlot || !timeSlot.start || !timeSlot.end) return null
 
     const formatTimeString = (timeStr: string) => {
       return timeStr.includes(':') ? timeStr.split(':').slice(0, 2).join(':') : timeStr
@@ -672,7 +676,7 @@ export default function SpaceDetailsPage() {
                                   <div>
                                     <div className="font-medium">{slot.description || `Time Slot ${index + 1}`}</div>
                                     <div className="text-sm text-muted-foreground">
-                                      {slot.start.substring(0, 5)} - {slot.end.substring(0, 5)}
+                                      {slot.start?.substring(0, 5)} - {slot.end?.substring(0, 5)}
                                     </div>
                                     {isBooked && (
                                       <div className="text-muted-foreground text-sm flex items-center">

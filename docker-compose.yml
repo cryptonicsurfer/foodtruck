@@ -1,0 +1,27 @@
+services:
+  foodtruck:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # NEXT_PUBLIC_* are inlined at build time. Compose auto-loads the sibling
+      # .env file for these ${...} substitutions.
+      args:
+        NEXT_PUBLIC_DIRECTUS_URL: ${NEXT_PUBLIC_DIRECTUS_URL}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
+        NEXT_PUBLIC_GOOGLE_MAP_ID: ${NEXT_PUBLIC_GOOGLE_MAP_ID}
+    container_name: foodtruck
+    # Host 3009 -> container 3000. Bound to localhost; Caddy reverse-proxies it.
+    ports:
+      - "127.0.0.1:3009:3000"
+    # Runtime env (DIRECTUS_URL, APP_URL, etc.) read by the server at request time.
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      # Root is unauthenticated; auth-gated routes 307/401 — treat <500 as healthy.
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/').then(r => process.exit(r.status < 500 ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
