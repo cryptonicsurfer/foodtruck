@@ -23,6 +23,9 @@ import {
 } from "@/components/ui/dialog"
 import { Users, CalendarOff, Settings, Trash2, Power, PowerOff, Plus, ExternalLink, UserPlus, Pencil, FileText, Link, Upload } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
+import { MultiDateCalendar, type CalendarBooking } from "@/components/multi-date-calendar"
+import { cn } from "@/lib/utils"
+import { format, startOfMonth, addMonths } from "date-fns"
 import {
   adminGetAllFoodTrucks,
   adminSetFoodTruckActive,
@@ -38,7 +41,8 @@ import {
   adminCreateDocument,
   adminDeleteDocument,
   getBookingRules,
-  getAllSpaces
+  getAllSpaces,
+  getBookingsForDateRange
 } from "@/app/actions"
 
 interface FoodTruck {
@@ -124,6 +128,10 @@ export default function AdminPage() {
   const [savingEdit, setSavingEdit] = useState(false)
   const [blockDateDialog, setBlockDateDialog] = useState(false)
   const [newBlockedDate, setNewBlockedDate] = useState({ space: "", date: "", time_slot: "all_day" as const, reason: "" })
+  const [blockMode, setBlockMode] = useState<"day" | "period">("day")
+  const [periodDates, setPeriodDates] = useState<string[]>([])
+  const [savingBlock, setSavingBlock] = useState(false)
+  const [periodBookings, setPeriodBookings] = useState<any[]>([])
 
   // Add food truck dialog state
   const [addTruckDialog, setAddTruckDialog] = useState(false)
@@ -243,6 +251,82 @@ export default function AdminPage() {
       setNewBlockedDate({ space: "", date: "", time_slot: "all_day", reason: "" })
     }
   }
+
+  const handleCreateBlockedPeriod = async () => {
+    if (!newBlockedDate.space || periodDates.length === 0) return
+
+    setSavingBlock(true)
+    let hadError = false
+    for (const date of periodDates) {
+      const result = await adminCreateSpaceBlockedDate({
+        space: parseInt(newBlockedDate.space),
+        date,
+        time_slot: newBlockedDate.time_slot,
+        reason: newBlockedDate.reason || undefined
+      })
+      if (!result.success) hadError = true
+    }
+    setSavingBlock(false)
+
+    await loadData()
+    if (!hadError) {
+      closeBlockDialog()
+    }
+  }
+
+  const closeBlockDialog = () => {
+    setBlockDateDialog(false)
+    setBlockMode("day")
+    setPeriodDates([])
+    setPeriodBookings([])
+    setNewBlockedDate({ space: "", date: "", time_slot: "all_day", reason: "" })
+  }
+
+  // Load bookings (wide window) once the period dialog is open and a space is chosen,
+  // so the calendar can flag days that already have bookings.
+  useEffect(() => {
+    if (!blockDateDialog || blockMode !== "period" || !newBlockedDate.space) {
+      return
+    }
+    let cancelled = false
+    const start = startOfMonth(new Date())
+    const end = addMonths(start, 18)
+    getBookingsForDateRange(start.toISOString(), end.toISOString()).then((res) => {
+      if (!cancelled && res.success) {
+        setPeriodBookings(res.data || [])
+      }
+    })
+    return () => { cancelled = true }
+  }, [blockDateDialog, blockMode, newBlockedDate.space])
+
+  // Bookings for the chosen space, keyed by "yyyy-MM-dd" → [{ foodtruck, space }]
+  const periodBookingsByDate = (() => {
+    const map: Record<string, CalendarBooking[]> = {}
+    if (!newBlockedDate.space) return map
+    for (const b of periodBookings) {
+      if (String(b.space?.id ?? b.space) !== newBlockedDate.space) continue
+      if (!b.start) continue
+      const key = format(new Date(b.start), "yyyy-MM-dd")
+      ;(map[key] ||= []).push({
+        foodtruck: b.foodtruck?.name ?? "Okänd foodtruck",
+        space: b.space?.name ?? "Okänd plats",
+      })
+    }
+    return map
+  })()
+
+  // Dates already blocked for the chosen space + slot (all_day always counts) — shown as disabled in the calendar
+  const alreadyBlockedForSelection = (() => {
+    if (!newBlockedDate.space) return [] as string[]
+    return blockedDates
+      .filter((d: any) =>
+        String(d.space?.id ?? d.space) === newBlockedDate.space &&
+        (d.time_slot === "all_day" ||
+          newBlockedDate.time_slot === "all_day" ||
+          d.time_slot === newBlockedDate.time_slot)
+      )
+      .map((d: any) => d.date)
+  })()
 
   const handleDeleteBlockedDate = async (id: number) => {
     const result = await adminDeleteSpaceBlockedDate(String(id))
@@ -742,38 +826,78 @@ export default function AdminPage() {
         </Dialog>
 
         {/* Block Date Dialog */}
-        <Dialog open={blockDateDialog} onOpenChange={setBlockDateDialog}>
-          <DialogContent>
+        <Dialog open={blockDateDialog} onOpenChange={(open) => { if (!open) closeBlockDialog() }}>
+          <DialogContent
+            className={blockMode === "period" ? "sm:max-w-lg flex flex-col gap-4" : undefined}
+            style={blockMode === "period" ? {
+              top: "2.5vh",
+              bottom: "2.5vh",
+              maxHeight: "none",
+              height: "auto",
+              translate: "none",
+              transform: "translateX(-50%)",
+            } : undefined}
+          >
             <DialogHeader>
               <DialogTitle>Spärra datum</DialogTitle>
               <DialogDescription>
-                Välj en plats och datum att spärra för bokningar
+                Välj plats och {blockMode === "period" ? "markera flera datum i kalendern" : "datum"} att spärra för bokningar
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="space">Plats</Label>
-                <select
-                  id="space"
-                  className="w-full border rounded-md p-2"
-                  value={newBlockedDate.space}
-                  onChange={(e) => setNewBlockedDate(prev => ({ ...prev, space: e.target.value }))}
-                >
-                  <option value="">Välj plats...</option>
-                  {spaces.map(space => (
-                    <option key={space.id} value={space.id}>{space.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="date">Datum</Label>
-                <Input
-                  id="date"
-                  type="date"
-                  value={newBlockedDate.date}
-                  onChange={(e) => setNewBlockedDate(prev => ({ ...prev, date: e.target.value }))}
-                />
-              </div>
+
+            {/* Toggle: single day vs period */}
+            <div className="inline-flex rounded-md bg-muted p-1 text-muted-foreground w-full">
+              <button
+                type="button"
+                onClick={() => setBlockMode("day")}
+                className={cn(
+                  "flex-1 rounded-sm px-3 py-1.5 text-sm font-medium transition-colors",
+                  blockMode === "day" ? "bg-background text-foreground shadow-sm" : "hover:text-foreground"
+                )}
+              >
+                Spärra dag
+              </button>
+              <button
+                type="button"
+                onClick={() => setBlockMode("period")}
+                className={cn(
+                  "flex-1 rounded-sm px-3 py-1.5 text-sm font-medium transition-colors",
+                  blockMode === "period" ? "bg-background text-foreground shadow-sm" : "hover:text-foreground"
+                )}
+              >
+                Spärra period
+              </button>
+            </div>
+
+            {/* Plats — pinned (always visible; it unlocks the calendar) */}
+            <div className="space-y-2">
+              <Label htmlFor="space">Plats</Label>
+              <select
+                id="space"
+                className="w-full border rounded-md p-2"
+                value={newBlockedDate.space}
+                onChange={(e) => setNewBlockedDate(prev => ({ ...prev, space: e.target.value }))}
+              >
+                <option value="">Välj plats...</option>
+                {spaces.map(space => (
+                  <option key={space.id} value={space.id}>{space.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-1 px-1 -mx-1">
+              {blockMode === "day" && (
+                <div className="space-y-2">
+                  <Label htmlFor="date">Datum</Label>
+                  <Input
+                    id="date"
+                    type="date"
+                    value={newBlockedDate.date}
+                    onChange={(e) => setNewBlockedDate(prev => ({ ...prev, date: e.target.value }))}
+                  />
+                </div>
+              )}
+
               <div className="space-y-2">
                 <Label htmlFor="time_slot">Tidslucka</Label>
                 <select
@@ -787,6 +911,7 @@ export default function AdminPage() {
                   <option value="evening">Kväll (16-03)</option>
                 </select>
               </div>
+
               <div className="space-y-2">
                 <Label htmlFor="reason">Anledning (valfritt)</Label>
                 <Input
@@ -796,14 +921,60 @@ export default function AdminPage() {
                   onChange={(e) => setNewBlockedDate(prev => ({ ...prev, reason: e.target.value }))}
                 />
               </div>
+
+              {blockMode === "period" && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Datum {newBlockedDate.space ? "" : "(välj plats först)"}</Label>
+                    {periodDates.length > 0 && (
+                      <button
+                        type="button"
+                        className="text-xs text-muted-foreground hover:text-foreground underline"
+                        onClick={() => setPeriodDates([])}
+                      >
+                        Rensa
+                      </button>
+                    )}
+                  </div>
+                  <div className={cn("rounded-md border p-3", !newBlockedDate.space && "opacity-50 pointer-events-none")}>
+                    <MultiDateCalendar
+                      selected={periodDates}
+                      disabledDates={alreadyBlockedForSelection}
+                      bookingsByDate={periodBookingsByDate}
+                      onToggle={(date) =>
+                        setPeriodDates(prev =>
+                          prev.includes(date) ? prev.filter(d => d !== date) : [...prev, date]
+                        )
+                      }
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {periodDates.length > 0
+                      ? `${periodDates.length} ${periodDates.length === 1 ? "dag" : "dagar"} markerade`
+                      : "Klicka på datum för att markera dem. Bläddra mellan månader med pilarna."}
+                  </p>
+                </div>
+              )}
             </div>
+
             <DialogFooter>
-              <Button variant="outline" onClick={() => setBlockDateDialog(false)}>
+              <Button variant="outline" onClick={closeBlockDialog}>
                 Avbryt
               </Button>
-              <Button onClick={handleCreateBlockedDate} disabled={!newBlockedDate.space || !newBlockedDate.date}>
-                Spärra
-              </Button>
+              {blockMode === "day" ? (
+                <Button onClick={handleCreateBlockedDate} disabled={!newBlockedDate.space || !newBlockedDate.date}>
+                  Spärra
+                </Button>
+              ) : (
+                <Button
+                  onClick={handleCreateBlockedPeriod}
+                  disabled={!newBlockedDate.space || periodDates.length === 0 || savingBlock}
+                >
+                  {savingBlock
+                    ? "Sparar…"
+                    : `Spara${periodDates.length > 0 ? ` (${periodDates.length})` : ""}`}
+                </Button>
+              )}
             </DialogFooter>
           </DialogContent>
         </Dialog>
