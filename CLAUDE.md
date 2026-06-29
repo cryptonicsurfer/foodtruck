@@ -15,7 +15,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - React 19 with TanStack Query for data fetching
 - Tailwind CSS 4 with shadcn/ui components (Radix UI primitives)
 - Directus CMS backend at cms.businessfalkenberg.se
-- Google Maps integration via @react-google-maps/api
+- **Two different maps**: the public booking/spaces map in the app is **Google
+  Maps** (`@react-google-maps/api`, referrer-locked `foodtruck-maps-js` key);
+  the `spaces.location` editor inside **Directus admin** is the CMS's own
+  **OpenStreetMap/MapLibre** widget. Coordinates are stored once as a PostGIS
+  Point (SRID 4326, GeoJSON `[lng, lat]`) and rendered by both.
 
 ### Key Architectural Patterns
 
@@ -29,17 +33,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `components/protected-route.tsx` - Route protection wrapper with redirect-after-login support
 - Auth pages: `/login`, `/auth/password-request`, `/auth/password-reset`
 - No signup page (users created in Directus admin)
+- **Booking is owner-only**: `/booking` only works for a user whose account has a
+  linked `foodtruck` (the Foodtrucker role). Admin / "Head of Foodtruck" accounts
+  have **no** foodtruck, so `handleBookSpace` returns early — the page shows an
+  amber "ingen foodtruck kopplad" banner (gated by a `userLoaded` flag) instead
+  of letting them book. To test the booking flow, log in as a foodtruck account.
+- Admin roles (`/admin` access): `ADMIN_ROLES = ['Administrator', 'Head of Foodtruck']` in `app/actions.ts`.
 
 **Provider Hierarchy** (in `app/layout.tsx`):
 ```
 EnvProvider → QueryProvider → AuthProvider → MapsProvider
 ```
+The shadcn `<Toaster />` is also mounted in `app/layout.tsx` (after the
+providers). It must stay mounted — without it, every `toast()` call across the
+app silently does nothing (see Gotchas).
 
 ### Directus Schema
 
 **Collections:**
 - `foodtrucks` - id, name, user (FK to Directus user), bookings relation
-- `spaces` - id, name, location (geographic point), time_slots, bookings relation, `bookable_from`/`bookable_to` (date, nullable — seasonal booking window; null = always bookable)
+- `spaces` - id, name, location (PostGIS Point, SRID 4326, `[lng, lat]`; spaces without it just don't get a map marker — booking still works via the list), time_slots, bookings relation, `bookable_from`/`bookable_to` (date, nullable — seasonal booking window; null = always bookable)
 - `foodtruck_bookings` - id, foodtruck (FK), space (FK), start, end datetimes
 - `foodtruck_rules` - Booking rules (max_future_bookings, max_days_ahead, last_minute_booking_hours)
 - `space_blocked_dates` - id, space (FK), date (`yyyy-MM-dd`), time_slot (`morning` | `evening` | `all_day`), reason?, status (`published` | `archived`). Admin-managed; `createBooking()` rejects bookings via `isSpaceBlocked()` before they're created. Independent of `foodtruck_rules`.
@@ -135,5 +148,22 @@ The block-date dialog has two modes via a toggle:
 - Server actions return `{ success: boolean, data?: T, error?: string }`
 
 ## Gotchas
+
+- **`<Toaster />` must stay mounted in `app/layout.tsx`.** It was historically
+  missing (a dead `<div id="toast-container" />` placeholder sat there instead),
+  which made **every** `toast()` in the app silently no-op — booking success,
+  errors, validation, all invisible. If toasts stop showing, check the layout first.
+
+- **Directus `spaces.location` map widget needs a Caddy CSP exception.** The
+  Directus map field uses MapLibre GL, which spawns a `blob:` web worker and
+  fetches tile data. The shared `(security_headers)` Caddy snippet has no
+  `worker-src blob:` and a locked-down `connect-src`, so the map renders blank
+  (controls + attribution show, tiles don't). Fix lives in the VPS
+  `/etc/caddy/Caddyfile`: the `cms.businessfalkenberg.se` block has its **own**
+  CSP (not `import security_headers`) adding `script-src … blob:`,
+  `worker-src 'self' blob:`, and `connect-src … *.tile.openstreetmap.org
+  basemaps.cartocdn.com`. Applied via graceful `sudo systemctl reload caddy` (no
+  Directus restart, no fleet auth blip). Backup: `~/Caddyfile.bak-mapfix` on the VPS.
+  If tiles still fail for a basemap, add that tile host to the cms `connect-src`.
 
 - **Tall dialogs are mis-centered** (Tailwind v4). `components/ui/dialog.tsx` `DialogContent` carries both Tailwind translate utilities (which set the v4 `translate` CSS property) *and* an arbitrary `[transform:translate(-50%,-50%)]`. The two stack to ≈ -100% height, so a dialog near full viewport height gets pushed off the top of the screen. For tall content, override with an inline style that pins it cleanly instead of relying on translate centering — e.g. `style={{ top: "2.5vh", bottom: "2.5vh", maxHeight: "none", height: "auto", translate: "none", transform: "translateX(-50%)" }}` plus `flex flex-col` on the content and `flex-1 min-h-0 overflow-y-auto` on the scrollable middle (see the "Spärra period" dialog in `app/admin/page.tsx`). Important modifiers use the v4 **suffix** form (`flex!`), not the v3 prefix (`!flex`).
