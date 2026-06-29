@@ -134,8 +134,9 @@ export default function AdminPage() {
   const [scheduleDetail, setScheduleDetail] = useState<
     { date: string; space: string; slot: "morning" | "evening"; foodtruckId: string; foodtruckName: string } | null
   >(null)
-  // Per-space season-window edits: { [spaceId]: { from, to } } (yyyy-MM-dd strings, "" = open)
-  const [seasonEdits, setSeasonEdits] = useState<Record<string, { from: string; to: string }>>({})
+  // Per-space season-window edits. `limited` gates the date inputs so an unrestricted
+  // space reads clearly as "no limit" instead of Safari painting today into empty date boxes.
+  const [seasonEdits, setSeasonEdits] = useState<Record<string, { from: string; to: string; limited: boolean }>>({})
   const [savingSeason, setSavingSeason] = useState<string | null>(null)
 
   // Document dialog states
@@ -337,30 +338,32 @@ export default function AdminPage() {
 
   // Seed the season-window editor from loaded spaces (resets on reload)
   useEffect(() => {
-    const init: Record<string, { from: string; to: string }> = {}
+    const init: Record<string, { from: string; to: string; limited: boolean }> = {}
     for (const s of spaces) {
-      init[String(s.id)] = {
-        from: s.bookable_from ? String(s.bookable_from).slice(0, 10) : "",
-        to: s.bookable_to ? String(s.bookable_to).slice(0, 10) : "",
-      }
+      const from = s.bookable_from ? String(s.bookable_from).slice(0, 10) : ""
+      const to = s.bookable_to ? String(s.bookable_to).slice(0, 10) : ""
+      init[String(s.id)] = { from, to, limited: Boolean(from || to) }
     }
     setSeasonEdits(init)
   }, [spaces])
 
   const handleSaveSeason = async (space: Space) => {
-    const edit = seasonEdits[String(space.id)] || { from: "", to: "" }
-    if (edit.from && edit.to && edit.from > edit.to) {
+    const edit = seasonEdits[String(space.id)] || { from: "", to: "", limited: false }
+    // When the period is switched off, clear both bounds (always bookable).
+    const from = edit.limited ? edit.from : ""
+    const to = edit.limited ? edit.to : ""
+    if (from && to && from > to) {
       setError("Från-datum måste vara före till-datum")
       return
     }
     setSavingSeason(String(space.id))
     const result = await adminUpdateSpace(String(space.id), {
-      bookable_from: edit.from || null,
-      bookable_to: edit.to || null,
+      bookable_from: from || null,
+      bookable_to: to || null,
     })
     if (result.success) {
       setSpaces(prev => prev.map(s =>
-        s.id === space.id ? { ...s, bookable_from: edit.from || null, bookable_to: edit.to || null } : s
+        s.id === space.id ? { ...s, bookable_from: from || null, bookable_to: to || null } : s
       ))
       setError(null)
     } else {
@@ -913,55 +916,50 @@ export default function AdminPage() {
                       ) : (
                         <div className="space-y-3">
                           {spaces.map(space => {
-                            const edit = seasonEdits[String(space.id)] || { from: "", to: "" }
-                            const dirty =
-                              edit.from !== (space.bookable_from ? String(space.bookable_from).slice(0, 10) : "") ||
-                              edit.to !== (space.bookable_to ? String(space.bookable_to).slice(0, 10) : "")
+                            const edit = seasonEdits[String(space.id)] || { from: "", to: "", limited: false }
+                            const savedFrom = space.bookable_from ? String(space.bookable_from).slice(0, 10) : ""
+                            const savedTo = space.bookable_to ? String(space.bookable_to).slice(0, 10) : ""
+                            // Compare against the would-be-saved values (cleared when not limited)
+                            const effFrom = edit.limited ? edit.from : ""
+                            const effTo = edit.limited ? edit.to : ""
+                            const dirty = effFrom !== savedFrom || effTo !== savedTo
+                            const update = (patch: Partial<typeof edit>) =>
+                              setSeasonEdits(prev => ({ ...prev, [String(space.id)]: { ...edit, ...patch } }))
                             return (
                               <div key={space.id} className="p-4 rounded-lg border">
-                                <div className="flex items-center justify-between gap-2 mb-3">
+                                <div className="flex items-center justify-between gap-3 flex-wrap">
                                   <h3 className="font-medium">{space.name}</h3>
-                                  {!edit.from && !edit.to && (
-                                    <span className="text-xs text-muted-foreground">Alltid bokningsbar</span>
-                                  )}
+                                  <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                                    <input
+                                      type="checkbox"
+                                      className="rounded"
+                                      checked={edit.limited}
+                                      onChange={(e) => update({ limited: e.target.checked })}
+                                    />
+                                    Begränsa bokningsbar period
+                                  </label>
                                 </div>
-                                <div className="flex flex-col sm:flex-row sm:items-end gap-3">
-                                  <div className="space-y-1 flex-1">
-                                    <Label htmlFor={`from-${space.id}`} className="text-xs">Bokningsbar från</Label>
-                                    <Input
-                                      id={`from-${space.id}`}
-                                      type="date"
-                                      value={edit.from}
-                                      onChange={(e) => setSeasonEdits(prev => ({
-                                        ...prev,
-                                        [String(space.id)]: { ...edit, from: e.target.value },
-                                      }))}
-                                    />
-                                  </div>
-                                  <div className="space-y-1 flex-1">
-                                    <Label htmlFor={`to-${space.id}`} className="text-xs">Bokningsbar till</Label>
-                                    <Input
-                                      id={`to-${space.id}`}
-                                      type="date"
-                                      value={edit.to}
-                                      onChange={(e) => setSeasonEdits(prev => ({
-                                        ...prev,
-                                        [String(space.id)]: { ...edit, to: e.target.value },
-                                      }))}
-                                    />
-                                  </div>
-                                  <div className="flex gap-2">
-                                    {(edit.from || edit.to) && (
-                                      <Button
-                                        variant="outline"
-                                        onClick={() => setSeasonEdits(prev => ({
-                                          ...prev,
-                                          [String(space.id)]: { from: "", to: "" },
-                                        }))}
-                                      >
-                                        Rensa
-                                      </Button>
-                                    )}
+
+                                {edit.limited ? (
+                                  <div className="flex flex-col sm:flex-row sm:items-end gap-3 mt-3">
+                                    <div className="space-y-1 flex-1">
+                                      <Label htmlFor={`from-${space.id}`} className="text-xs">Bokningsbar från</Label>
+                                      <Input
+                                        id={`from-${space.id}`}
+                                        type="date"
+                                        value={edit.from}
+                                        onChange={(e) => update({ from: e.target.value })}
+                                      />
+                                    </div>
+                                    <div className="space-y-1 flex-1">
+                                      <Label htmlFor={`to-${space.id}`} className="text-xs">Bokningsbar till</Label>
+                                      <Input
+                                        id={`to-${space.id}`}
+                                        type="date"
+                                        value={edit.to}
+                                        onChange={(e) => update({ to: e.target.value })}
+                                      />
+                                    </div>
                                     <Button
                                       onClick={() => handleSaveSeason(space)}
                                       disabled={!dirty || savingSeason === String(space.id)}
@@ -969,7 +967,19 @@ export default function AdminPage() {
                                       {savingSeason === String(space.id) ? "Sparar…" : "Spara"}
                                     </Button>
                                   </div>
-                                </div>
+                                ) : (
+                                  <div className="flex items-center justify-between gap-3 mt-2">
+                                    <p className="text-sm text-muted-foreground">Ingen begränsning — alltid bokningsbar</p>
+                                    {dirty && (
+                                      <Button
+                                        onClick={() => handleSaveSeason(space)}
+                                        disabled={savingSeason === String(space.id)}
+                                      >
+                                        {savingSeason === String(space.id) ? "Sparar…" : "Spara"}
+                                      </Button>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             )
                           })}
