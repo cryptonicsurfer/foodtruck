@@ -87,9 +87,17 @@ The block-date dialog has two modes via a toggle:
   Frej's Vercel 2026-06-18). See `DEPLOY.md` for the full runbook.
 - Production URL: `https://foodtruck.businessfalkenberg.se`
 - Container `foodtruck`, host `127.0.0.1:3009` → container `:3000`
-- Deploys from `cryptonicsurfer/foodtruck` → `main`
-- To deploy changes: `ssh -A glsfbg && cd ~/foodtruck && git pull && docker compose up -d --build`
-- Old Vercel deploy (`foodtruck-zeta.vercel.app`) is orphaned — no DNS points to it.
+- **We run on our own fork now — Frej has left.** This repo has two git remotes:
+  - `fork` → `cryptonicsurfer/foodtruck` — **our fork; this is what the VPS
+    deploys from. Push here** (`git push fork main`).
+  - `origin` → `frejandreassen/foodtruck` — Frej's upstream. Diverged (still
+    carries his Vercel-deploy GitHub Action); not our deploy source. Don't push
+    here — it'll be rejected and wouldn't deploy anyway.
+- To deploy changes: `git push fork main`, then
+  `ssh -A glsfbg && cd ~/foodtruck && git pull && docker compose up -d --build`
+  (the VPS `~/foodtruck` clone tracks `cryptonicsurfer/foodtruck`).
+- Frej's old Vercel deploy (`foodtruck-zeta.vercel.app`) is orphaned — no DNS
+  points to it, and we no longer maintain that pipeline.
 
 ### Environment Variables
 - `DIRECTUS_URL` / `NEXT_PUBLIC_DIRECTUS_URL` - Directus backend URL
