@@ -21,11 +21,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Users, CalendarOff, Settings, Trash2, Power, PowerOff, Plus, ExternalLink, UserPlus, Pencil, FileText, Link, Upload } from "lucide-react"
+import { Users, CalendarOff, Settings, Trash2, Power, PowerOff, Plus, ExternalLink, UserPlus, Pencil, FileText, Link, Upload, ClipboardList, MapPin, Sun, Moon, Soup, Calendar } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
 import { MultiDateCalendar, type CalendarBooking } from "@/components/multi-date-calendar"
 import { cn } from "@/lib/utils"
 import { format, startOfMonth, addMonths } from "date-fns"
+import { sv } from "date-fns/locale"
 import {
   adminGetAllFoodTrucks,
   adminSetFoodTruckActive,
@@ -49,6 +50,7 @@ interface FoodTruck {
   id: number
   name: string
   description?: string
+  image?: string
   active: boolean
   user?: {
     id: string
@@ -104,6 +106,8 @@ interface Document {
   sort?: number
 }
 
+const DIRECTUS_URL = process.env.NEXT_PUBLIC_DIRECTUS_URL || "https://cms.businessfalkenberg.se"
+
 export default function AdminPage() {
   const { isAdmin, isLoading: authLoading } = useAuth()
   const router = useRouter()
@@ -115,6 +119,18 @@ export default function AdminPage() {
   const [documents, setDocuments] = useState<Document[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Schedule (parking-officer overview) state
+  const [scheduleBookings, setScheduleBookings] = useState<any[]>([])
+  const [scheduleLoading, setScheduleLoading] = useState(false)
+  const [scheduleLoaded, setScheduleLoaded] = useState(false)
+  const [scheduleFrom, setScheduleFrom] = useState(format(new Date(), "yyyy-MM-dd"))
+  const [scheduleTo, setScheduleTo] = useState("")
+  const [scheduleSpace, setScheduleSpace] = useState("")
+  // Booking selected in the schedule → opens the foodtruck preview dialog
+  const [scheduleDetail, setScheduleDetail] = useState<
+    { date: string; space: string; slot: "morning" | "evening"; foodtruckId: string; foodtruckName: string } | null
+  >(null)
 
   // Document dialog states
   const [addDocumentDialog, setAddDocumentDialog] = useState(false)
@@ -185,6 +201,20 @@ export default function AdminPage() {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  // Lazy-load the schedule (bookings today → +12 months) the first time the tab opens
+  const loadSchedule = async (force = false) => {
+    if (scheduleLoaded && !force) return
+    setScheduleLoading(true)
+    const start = startOfMonth(new Date())
+    const end = addMonths(start, 12)
+    const res = await getBookingsForDateRange(start.toISOString(), end.toISOString())
+    if (res.success) {
+      setScheduleBookings(res.data || [])
+      setScheduleLoaded(true)
+    }
+    setScheduleLoading(false)
   }
 
   const handleToggleActive = async (truck: FoodTruck) => {
@@ -326,6 +356,45 @@ export default function AdminPage() {
           d.time_slot === newBlockedDate.time_slot)
       )
       .map((d: any) => d.date)
+  })()
+
+  // morning: starts before 16:00, evening: 16:00 onwards (matches available-slots-dialog)
+  const slotOf = (start: string): "morning" | "evening" =>
+    new Date(start).getHours() < 16 ? "morning" : "evening"
+
+  // Full food-truck info (image, owner, description) keyed by id — reused for the schedule thumbnails/preview
+  const foodTruckById = (() => {
+    const map: Record<string, FoodTruck> = {}
+    for (const t of foodTrucks) map[String(t.id)] = t
+    return map
+  })()
+
+  // Schedule grouped by date → sorted by space → sorted by slot, honoring the from/to/space filters.
+  const scheduleByDate = (() => {
+    const groups: Record<string, { foodtruck: string; foodtruckId: string; space: string; slot: "morning" | "evening"; start: string }[]> = {}
+    for (const b of scheduleBookings) {
+      if (!b.start) continue
+      const dateKey = format(new Date(b.start), "yyyy-MM-dd")
+      if (scheduleFrom && dateKey < scheduleFrom) continue
+      if (scheduleTo && dateKey > scheduleTo) continue
+      const spaceId = String(b.space?.id ?? b.space ?? "")
+      if (scheduleSpace && spaceId !== scheduleSpace) continue
+      ;(groups[dateKey] ||= []).push({
+        foodtruck: b.foodtruck?.name ?? "Okänd foodtruck",
+        foodtruckId: String(b.foodtruck?.id ?? b.foodtruck ?? ""),
+        space: b.space?.name ?? "Okänd plats",
+        slot: slotOf(b.start),
+        start: b.start,
+      })
+    }
+    return Object.entries(groups)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, items]) => ({
+        date,
+        items: items.sort(
+          (a, b) => a.space.localeCompare(b.space, "sv") || a.slot.localeCompare(b.slot)
+        ),
+      }))
   })()
 
   const handleDeleteBlockedDate = async (id: number) => {
@@ -479,8 +548,16 @@ export default function AdminPage() {
                 </div>
               )}
 
-              <Tabs defaultValue="foodtrucks" className="space-y-4">
+              <Tabs
+                defaultValue="foodtrucks"
+                className="space-y-4"
+                onValueChange={(v) => { if (v === "schedule") loadSchedule() }}
+              >
                 <TabsList className="inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground w-full">
+                  <TabsTrigger value="schedule" className="flex items-center gap-2 flex-1">
+                    <ClipboardList size={16} />
+                    <span className="hidden sm:inline">Schema</span>
+                  </TabsTrigger>
                   <TabsTrigger value="foodtrucks" className="flex items-center gap-2 flex-1">
                     <Users size={16} />
                     <span className="hidden sm:inline">Aktörer</span>
@@ -498,6 +575,139 @@ export default function AdminPage() {
                     <span className="hidden sm:inline">Inställningar</span>
                   </TabsTrigger>
                 </TabsList>
+
+                {/* Schedule / parking-officer overview Tab */}
+                <TabsContent value="schedule">
+                  <Card>
+                    <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <CardTitle>Schema</CardTitle>
+                        <CardDescription>
+                          Vem som får stå var, per dag och plats. Sorterat på datum.
+                        </CardDescription>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => loadSchedule(true)}
+                        disabled={scheduleLoading}
+                      >
+                        {scheduleLoading ? "Uppdaterar…" : "Uppdatera"}
+                      </Button>
+                    </CardHeader>
+                    <CardContent>
+                      {/* Filters */}
+                      <div className="grid gap-3 sm:grid-cols-3 mb-6">
+                        <div className="space-y-1">
+                          <Label htmlFor="scheduleFrom" className="text-xs">Från datum</Label>
+                          <Input
+                            id="scheduleFrom"
+                            type="date"
+                            value={scheduleFrom}
+                            onChange={(e) => setScheduleFrom(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="scheduleTo" className="text-xs">Till datum (valfritt)</Label>
+                          <Input
+                            id="scheduleTo"
+                            type="date"
+                            value={scheduleTo}
+                            onChange={(e) => setScheduleTo(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="scheduleSpace" className="text-xs">Plats</Label>
+                          <select
+                            id="scheduleSpace"
+                            className="w-full border rounded-md p-2 h-10"
+                            value={scheduleSpace}
+                            onChange={(e) => setScheduleSpace(e.target.value)}
+                          >
+                            <option value="">Alla platser</option>
+                            {spaces.map(space => (
+                              <option key={space.id} value={space.id}>{space.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      {scheduleLoading && !scheduleLoaded ? (
+                        <div className="space-y-4">
+                          {[1, 2, 3].map(i => <Skeleton key={i} className="h-24 w-full" />)}
+                        </div>
+                      ) : scheduleByDate.length === 0 ? (
+                        <p className="text-center text-muted-foreground py-8">
+                          Inga bokningar i vald period
+                        </p>
+                      ) : (
+                        <div className="space-y-6">
+                          {scheduleByDate.map(({ date, items }) => (
+                            <div key={date}>
+                              <h3 className="font-semibold capitalize border-b pb-2 mb-3">
+                                {format(new Date(date), "EEEE d MMMM yyyy", { locale: sv })}
+                                <span className="ml-2 text-sm font-normal text-muted-foreground">
+                                  {items.length} {items.length === 1 ? "bokning" : "bokningar"}
+                                </span>
+                              </h3>
+                              <div className="space-y-2">
+                                {items.map((item, idx) => {
+                                  const truck = foodTruckById[item.foodtruckId]
+                                  const image = truck?.image
+                                  return (
+                                    <button
+                                      key={idx}
+                                      type="button"
+                                      onClick={() => setScheduleDetail({
+                                        date,
+                                        space: item.space,
+                                        slot: item.slot,
+                                        foodtruckId: item.foodtruckId,
+                                        foodtruckName: item.foodtruck,
+                                      })}
+                                      className="w-full flex items-center gap-3 p-3 rounded-lg border bg-white text-left transition-colors hover:bg-muted/60 active:bg-muted"
+                                    >
+                                      {image ? (
+                                        <img
+                                          src={`${DIRECTUS_URL}/assets/${image}?width=88&height=88&fit=cover`}
+                                          alt=""
+                                          className="h-11 w-11 rounded-md object-cover shrink-0 bg-muted"
+                                          onError={(e) => { (e.target as HTMLImageElement).style.visibility = "hidden" }}
+                                        />
+                                      ) : (
+                                        <div className="h-11 w-11 rounded-md bg-muted flex items-center justify-center shrink-0">
+                                          <Soup size={18} className="text-muted-foreground" />
+                                        </div>
+                                      )}
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-1.5 min-w-0">
+                                          <MapPin size={14} className="text-muted-foreground shrink-0" />
+                                          <span className="font-medium truncate">{item.space}</span>
+                                        </div>
+                                        <p className="text-sm text-muted-foreground truncate">{item.foodtruck}</p>
+                                      </div>
+                                      <span
+                                        className={cn(
+                                          "inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full shrink-0",
+                                          item.slot === "morning"
+                                            ? "bg-amber-100 text-amber-700"
+                                            : "bg-indigo-100 text-indigo-700"
+                                        )}
+                                      >
+                                        {item.slot === "morning" ? <Sun size={12} /> : <Moon size={12} />}
+                                        <span className="hidden sm:inline">{item.slot === "morning" ? "Morgon/Lunch" : "Kväll"}</span>
+                                      </span>
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
 
                 {/* Food Trucks Tab */}
                 <TabsContent value="foodtrucks">
@@ -1172,6 +1382,105 @@ export default function AdminPage() {
                 {creatingDocument ? "Lägger till..." : "Lägg till"}
               </Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        {/* Schedule booking → foodtruck preview Dialog */}
+        <Dialog open={!!scheduleDetail} onOpenChange={(open) => { if (!open) setScheduleDetail(null) }}>
+          <DialogContent
+            className="max-w-md p-0 overflow-hidden gap-0 flex flex-col"
+            style={{
+              maxHeight: "92vh",
+              translate: "none",
+              transform: "translate(-50%, -50%)",
+            }}
+          >
+            {(() => {
+              if (!scheduleDetail) return null
+              const truck = foodTruckById[scheduleDetail.foodtruckId]
+              const image = truck?.image
+              const name = truck?.name || scheduleDetail.foodtruckName
+              return (
+                <>
+                  <DialogHeader className="sr-only">
+                    <DialogTitle>{name}</DialogTitle>
+                    <DialogDescription>Bokningsinformation och foodtruck-detaljer</DialogDescription>
+                  </DialogHeader>
+
+                  {/* Hero image */}
+                  <div className="h-48 bg-muted relative shrink-0">
+                    {image ? (
+                      <img
+                        src={`${DIRECTUS_URL}/assets/${image}`}
+                        alt={name}
+                        className="absolute inset-0 w-full h-full object-cover"
+                        onError={(e) => { (e.target as HTMLImageElement).src = "/food-truck-logo.svg" }}
+                      />
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <Soup className="h-14 w-14 text-muted-foreground" />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
+                    <div>
+                      <h2 className="text-xl font-bold">{name}</h2>
+                      {truck && !truck.active && (
+                        <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded">Inaktiv</span>
+                      )}
+                    </div>
+
+                    {/* Booking context */}
+                    <div className="grid grid-cols-1 gap-2 rounded-lg bg-muted/50 p-3 text-sm">
+                      <div className="flex items-center gap-2">
+                        <Calendar size={15} className="text-muted-foreground shrink-0" />
+                        <span className="capitalize">
+                          {format(new Date(scheduleDetail.date), "EEEE d MMMM yyyy", { locale: sv })}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <MapPin size={15} className="text-muted-foreground shrink-0" />
+                        <span>{scheduleDetail.space}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {scheduleDetail.slot === "morning"
+                          ? <Sun size={15} className="text-amber-600 shrink-0" />
+                          : <Moon size={15} className="text-indigo-600 shrink-0" />}
+                        <span>{scheduleDetail.slot === "morning" ? "Morgon/Lunch (06–15)" : "Kväll (16–03)"}</span>
+                      </div>
+                    </div>
+
+                    {truck?.description && (
+                      <p className="text-sm text-muted-foreground">{truck.description}</p>
+                    )}
+
+                    {truck?.user && (
+                      <div className="flex items-start gap-2 text-sm">
+                        <Users size={15} className="text-muted-foreground mt-0.5 shrink-0" />
+                        <div>
+                          <p className="font-medium">{truck.user.first_name} {truck.user.last_name}</p>
+                          <a href={`mailto:${truck.user.email}`} className="text-blue-600 hover:underline">
+                            {truck.user.email}
+                          </a>
+                        </div>
+                      </div>
+                    )}
+
+                    {truck && (
+                      <p className="text-xs text-muted-foreground">
+                        {truck.bookings?.length || 0} bokningar totalt
+                      </p>
+                    )}
+
+                    {!truck && (
+                      <p className="text-sm text-muted-foreground">
+                        Foodtrucken finns inte längre i systemet — endast bokningens namn visas.
+                      </p>
+                    )}
+                  </div>
+                </>
+              )
+            })()}
           </DialogContent>
         </Dialog>
       </SidebarProvider>
