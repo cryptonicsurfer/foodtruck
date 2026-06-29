@@ -24,6 +24,8 @@ import {
 import { Users, CalendarOff, Settings, Trash2, Power, PowerOff, Plus, ExternalLink, UserPlus, Pencil, FileText, Link, Upload, ClipboardList, MapPin, Sun, Moon, Soup, Calendar } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
 import { MultiDateCalendar, type CalendarBooking } from "@/components/multi-date-calendar"
+import { SpaceDialog } from "@/components/space-dialog"
+import { ConfirmDialog } from "@/components/confirm-dialog"
 import { cn } from "@/lib/utils"
 import { format, startOfMonth, addMonths } from "date-fns"
 import { sv } from "date-fns/locale"
@@ -34,7 +36,8 @@ import {
   adminUpdateFoodTruck,
   adminGetSpaceBlockedDates,
   adminCreateSpaceBlockedDate,
-  adminUpdateSpace,
+  adminDeleteSpace,
+  adminUpdateBookingRules,
   adminDeleteSpaceBlockedDate,
   adminGetUsersWithoutFoodTruck,
   adminCreateFoodTruckUser,
@@ -76,6 +79,9 @@ interface BlockedDate {
 interface Space {
   id: number
   name: string
+  description?: string | null
+  location?: { type?: string; coordinates?: [number, number] } | null
+  time_slots?: Array<{ start: string; end: string; description?: string }> | null
   bookable_from?: string | null
   bookable_to?: string | null
 }
@@ -134,10 +140,15 @@ export default function AdminPage() {
   const [scheduleDetail, setScheduleDetail] = useState<
     { date: string; space: string; slot: "morning" | "evening"; foodtruckId: string; foodtruckName: string } | null
   >(null)
-  // Per-space season-window edits. `limited` gates the date inputs so an unrestricted
-  // space reads clearly as "no limit" instead of Safari painting today into empty date boxes.
-  const [seasonEdits, setSeasonEdits] = useState<Record<string, { from: string; to: string; limited: boolean }>>({})
-  const [savingSeason, setSavingSeason] = useState<string | null>(null)
+  // Space management (create/edit dialog + delete confirm)
+  const [spaceDialog, setSpaceDialog] = useState<{ open: boolean; space: Space | null }>({ open: false, space: null })
+  const [deleteSpaceDialog, setDeleteSpaceDialog] = useState<{ open: boolean; space: Space | null }>({ open: false, space: null })
+  const [deletingSpace, setDeletingSpace] = useState(false)
+
+  // Booking-rules editing
+  const [rulesEdit, setRulesEdit] = useState({ maximum_future_bookings: "", maximum_days_ahead: "", last_minute_booking_hours: "" })
+  const [rulesConfirm, setRulesConfirm] = useState(false)
+  const [savingRules, setSavingRules] = useState(false)
 
   // Document dialog states
   const [addDocumentDialog, setAddDocumentDialog] = useState(false)
@@ -336,40 +347,56 @@ export default function AdminPage() {
     return () => { cancelled = true }
   }, [blockDateDialog, blockMode, newBlockedDate.space])
 
-  // Seed the season-window editor from loaded spaces (resets on reload)
+  // Seed the booking-rules editor from loaded rules
   useEffect(() => {
-    const init: Record<string, { from: string; to: string; limited: boolean }> = {}
-    for (const s of spaces) {
-      const from = s.bookable_from ? String(s.bookable_from).slice(0, 10) : ""
-      const to = s.bookable_to ? String(s.bookable_to).slice(0, 10) : ""
-      init[String(s.id)] = { from, to, limited: Boolean(from || to) }
-    }
-    setSeasonEdits(init)
-  }, [spaces])
-
-  const handleSaveSeason = async (space: Space) => {
-    const edit = seasonEdits[String(space.id)] || { from: "", to: "", limited: false }
-    // When the period is switched off, clear both bounds (always bookable).
-    const from = edit.limited ? edit.from : ""
-    const to = edit.limited ? edit.to : ""
-    if (from && to && from > to) {
-      setError("Från-datum måste vara före till-datum")
-      return
-    }
-    setSavingSeason(String(space.id))
-    const result = await adminUpdateSpace(String(space.id), {
-      bookable_from: from || null,
-      bookable_to: to || null,
+    if (!bookingRules) return
+    setRulesEdit({
+      maximum_future_bookings: String(bookingRules.maximum_future_bookings ?? ""),
+      maximum_days_ahead: String(bookingRules.maximum_days_ahead ?? ""),
+      last_minute_booking_hours: String(bookingRules.last_minute_booking_hours ?? ""),
     })
+  }, [bookingRules])
+
+  const handleDeleteSpace = async () => {
+    if (!deleteSpaceDialog.space) return
+    setDeletingSpace(true)
+    const result = await adminDeleteSpace(String(deleteSpaceDialog.space.id))
+    setDeletingSpace(false)
     if (result.success) {
-      setSpaces(prev => prev.map(s =>
-        s.id === space.id ? { ...s, bookable_from: from || null, bookable_to: to || null } : s
-      ))
+      setSpaces(prev => prev.filter(s => s.id !== deleteSpaceDialog.space?.id))
+      setDeleteSpaceDialog({ open: false, space: null })
+    } else {
+      setError(result.error || "Kunde inte ta bort platsen")
+      setDeleteSpaceDialog({ open: false, space: null })
+    }
+  }
+
+  const rulesDirty = bookingRules ? (
+    rulesEdit.maximum_future_bookings !== String(bookingRules.maximum_future_bookings ?? "") ||
+    rulesEdit.maximum_days_ahead !== String(bookingRules.maximum_days_ahead ?? "") ||
+    rulesEdit.last_minute_booking_hours !== String(bookingRules.last_minute_booking_hours ?? "")
+  ) : false
+
+  const handleSaveRules = async () => {
+    setSavingRules(true)
+    const result = await adminUpdateBookingRules({
+      maximum_future_bookings: Number(rulesEdit.maximum_future_bookings),
+      maximum_days_ahead: Number(rulesEdit.maximum_days_ahead),
+      last_minute_booking_hours: Number(rulesEdit.last_minute_booking_hours),
+    })
+    setSavingRules(false)
+    setRulesConfirm(false)
+    if (result.success) {
+      setBookingRules(prev => prev ? {
+        ...prev,
+        maximum_future_bookings: Number(rulesEdit.maximum_future_bookings),
+        maximum_days_ahead: Number(rulesEdit.maximum_days_ahead),
+        last_minute_booking_hours: Number(rulesEdit.last_minute_booking_hours),
+      } : prev)
       setError(null)
     } else {
-      setError(result.error || "Kunde inte spara säsong")
+      setError(result.error || "Kunde inte spara bokningsregler")
     }
-    setSavingSeason(null)
   }
 
   // Bookings for the chosen space, keyed by "yyyy-MM-dd" → [{ foodtruck, space }]
@@ -898,15 +925,18 @@ export default function AdminPage() {
                   </Card>
                 </TabsContent>
 
-                {/* Spaces / season window Tab */}
+                {/* Spaces management Tab */}
                 <TabsContent value="spaces">
                   <Card>
-                    <CardHeader>
-                      <CardTitle>Platser & säsong</CardTitle>
-                      <CardDescription>
-                        Sätt en bokningsbar datumperiod per plats. Lämna tomt = alltid bokningsbar.
-                        Utanför perioden kan foodtrucks inte boka platsen.
-                      </CardDescription>
+                    <CardHeader className="flex flex-row items-center justify-between">
+                      <div>
+                        <CardTitle>Platser</CardTitle>
+                        <CardDescription>Skapa, redigera och ta bort platser — namn, karta, tidsluckor och säsong.</CardDescription>
+                      </div>
+                      <Button onClick={() => setSpaceDialog({ open: true, space: null })} className="flex items-center gap-2">
+                        <Plus size={16} />
+                        <span className="hidden sm:inline">Skapa plats</span>
+                      </Button>
                     </CardHeader>
                     <CardContent>
                       {isLoading ? (
@@ -916,70 +946,37 @@ export default function AdminPage() {
                       ) : (
                         <div className="space-y-3">
                           {spaces.map(space => {
-                            const edit = seasonEdits[String(space.id)] || { from: "", to: "", limited: false }
-                            const savedFrom = space.bookable_from ? String(space.bookable_from).slice(0, 10) : ""
-                            const savedTo = space.bookable_to ? String(space.bookable_to).slice(0, 10) : ""
-                            // Compare against the would-be-saved values (cleared when not limited)
-                            const effFrom = edit.limited ? edit.from : ""
-                            const effTo = edit.limited ? edit.to : ""
-                            const dirty = effFrom !== savedFrom || effTo !== savedTo
-                            const update = (patch: Partial<typeof edit>) =>
-                              setSeasonEdits(prev => ({ ...prev, [String(space.id)]: { ...edit, ...patch } }))
+                            const hasCoord = Boolean(space.location?.coordinates)
+                            const slotCount = space.time_slots?.length || 0
+                            const from = space.bookable_from ? String(space.bookable_from).slice(0, 10).split("-").reverse().join("/") : ""
+                            const to = space.bookable_to ? String(space.bookable_to).slice(0, 10).split("-").reverse().join("/") : ""
+                            const season = from || to ? `Säsong ${from || "…"}–${to || "…"}` : "Alltid bokningsbar"
                             return (
-                              <div key={space.id} className="p-4 rounded-lg border">
-                                <div className="flex items-center justify-between gap-3 flex-wrap">
-                                  <h3 className="font-medium">{space.name}</h3>
-                                  <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-                                    <input
-                                      type="checkbox"
-                                      className="rounded"
-                                      checked={edit.limited}
-                                      onChange={(e) => update({ limited: e.target.checked })}
-                                    />
-                                    Begränsa bokningsbar period
-                                  </label>
+                              <div key={space.id} className="flex items-center justify-between gap-3 p-4 rounded-lg border">
+                                <div className="min-w-0">
+                                  <h3 className="font-medium truncate">{space.name}</h3>
+                                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground mt-1">
+                                    <span className={cn("flex items-center gap-1", !hasCoord && "text-amber-600")}>
+                                      <MapPin size={12} /> {hasCoord ? "Koordinat satt" : "Ingen koordinat"}
+                                    </span>
+                                    <span>{slotCount} {slotCount === 1 ? "tidslucka" : "tidsluckor"}</span>
+                                    <span>{season}</span>
+                                  </div>
                                 </div>
-
-                                {edit.limited ? (
-                                  <div className="flex flex-col sm:flex-row sm:items-end gap-3 mt-3">
-                                    <div className="space-y-1 flex-1">
-                                      <Label htmlFor={`from-${space.id}`} className="text-xs">Bokningsbar från</Label>
-                                      <Input
-                                        id={`from-${space.id}`}
-                                        type="date"
-                                        value={edit.from}
-                                        onChange={(e) => update({ from: e.target.value })}
-                                      />
-                                    </div>
-                                    <div className="space-y-1 flex-1">
-                                      <Label htmlFor={`to-${space.id}`} className="text-xs">Bokningsbar till</Label>
-                                      <Input
-                                        id={`to-${space.id}`}
-                                        type="date"
-                                        value={edit.to}
-                                        onChange={(e) => update({ to: e.target.value })}
-                                      />
-                                    </div>
-                                    <Button
-                                      onClick={() => handleSaveSeason(space)}
-                                      disabled={!dirty || savingSeason === String(space.id)}
-                                    >
-                                      {savingSeason === String(space.id) ? "Sparar…" : "Spara"}
-                                    </Button>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center justify-between gap-3 mt-2">
-                                    <p className="text-sm text-muted-foreground">Ingen begränsning — alltid bokningsbar</p>
-                                    {dirty && (
-                                      <Button
-                                        onClick={() => handleSaveSeason(space)}
-                                        disabled={savingSeason === String(space.id)}
-                                      >
-                                        {savingSeason === String(space.id) ? "Sparar…" : "Spara"}
-                                      </Button>
-                                    )}
-                                  </div>
-                                )}
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <Button variant="outline" size="sm" onClick={() => setSpaceDialog({ open: true, space })}>
+                                    <Pencil size={16} />
+                                    <span className="ml-1 hidden sm:inline">Redigera</span>
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="text-red-600 hover:text-red-700"
+                                    onClick={() => setDeleteSpaceDialog({ open: true, space })}
+                                  >
+                                    <Trash2 size={16} />
+                                  </Button>
+                                </div>
                               </div>
                             )
                           })}
@@ -1076,22 +1073,45 @@ export default function AdminPage() {
                         <div>
                           <h3 className="font-medium mb-4">Bokningsregler</h3>
                           <div className="grid gap-4 sm:grid-cols-3">
-                            <div className="bg-gray-50 p-4 rounded-lg">
-                              <p className="text-sm text-muted-foreground">Max framtida bokningar</p>
-                              <p className="text-2xl font-bold">{bookingRules?.maximum_future_bookings || "-"}</p>
+                            <div className="space-y-1">
+                              <Label htmlFor="rule-max" className="text-sm text-muted-foreground">Max framtida bokningar</Label>
+                              <Input
+                                id="rule-max"
+                                type="number"
+                                min={0}
+                                value={rulesEdit.maximum_future_bookings}
+                                onChange={(e) => setRulesEdit(prev => ({ ...prev, maximum_future_bookings: e.target.value }))}
+                              />
                             </div>
-                            <div className="bg-gray-50 p-4 rounded-lg">
-                              <p className="text-sm text-muted-foreground">Max dagar framåt</p>
-                              <p className="text-2xl font-bold">{bookingRules?.maximum_days_ahead || "-"}</p>
+                            <div className="space-y-1">
+                              <Label htmlFor="rule-days" className="text-sm text-muted-foreground">Max dagar framåt</Label>
+                              <Input
+                                id="rule-days"
+                                type="number"
+                                min={0}
+                                value={rulesEdit.maximum_days_ahead}
+                                onChange={(e) => setRulesEdit(prev => ({ ...prev, maximum_days_ahead: e.target.value }))}
+                              />
                             </div>
-                            <div className="bg-gray-50 p-4 rounded-lg">
-                              <p className="text-sm text-muted-foreground">Last-minute (timmar)</p>
-                              <p className="text-2xl font-bold">{bookingRules?.last_minute_booking_hours || "-"}</p>
+                            <div className="space-y-1">
+                              <Label htmlFor="rule-lastminute" className="text-sm text-muted-foreground">Last-minute (timmar)</Label>
+                              <Input
+                                id="rule-lastminute"
+                                type="number"
+                                min={0}
+                                value={rulesEdit.last_minute_booking_hours}
+                                onChange={(e) => setRulesEdit(prev => ({ ...prev, last_minute_booking_hours: e.target.value }))}
+                              />
                             </div>
                           </div>
-                          <p className="text-xs text-muted-foreground mt-4">
-                            Dessa värden kan ändras i Directus backoffice
-                          </p>
+                          <div className="flex items-center gap-3 mt-4">
+                            <Button onClick={() => setRulesConfirm(true)} disabled={!rulesDirty || savingRules}>
+                              {savingRules ? "Sparar…" : "Spara"}
+                            </Button>
+                            <p className="text-xs text-muted-foreground">
+                              Gäller alla foodtrucks. Last-minute = hur nära start en bokning får göras trots maxgränsen.
+                            </p>
+                          </div>
                         </div>
                       )}
                     </CardContent>
@@ -1627,6 +1647,38 @@ export default function AdminPage() {
             })()}
           </DialogContent>
         </Dialog>
+
+        {/* Space create/edit dialog */}
+        <SpaceDialog
+          open={spaceDialog.open}
+          onOpenChange={(open) => setSpaceDialog(prev => ({ ...prev, open }))}
+          space={spaceDialog.space}
+          onSaved={loadData}
+        />
+
+        {/* Space delete — type "bekräfta" */}
+        <ConfirmDialog
+          open={deleteSpaceDialog.open}
+          onOpenChange={(open) => setDeleteSpaceDialog(prev => ({ ...prev, open }))}
+          title={`Ta bort ${deleteSpaceDialog.space?.name ?? "platsen"}?`}
+          description="Vill du göra dessa ändringar? Platsen tas bort permanent. Detta går inte att ångra. (Går inte om platsen har bokningar.)"
+          destructive
+          requireText="bekräfta"
+          confirmLabel="Ta bort"
+          loading={deletingSpace}
+          onConfirm={handleDeleteSpace}
+        />
+
+        {/* Booking rules save confirm */}
+        <ConfirmDialog
+          open={rulesConfirm}
+          onOpenChange={setRulesConfirm}
+          title="Spara bokningsregler?"
+          description="Vill du göra dessa ändringar? De gäller direkt för alla foodtrucks."
+          confirmLabel="Spara"
+          loading={savingRules}
+          onConfirm={handleSaveRules}
+        />
       </SidebarProvider>
     </ProtectedRoute>
   )

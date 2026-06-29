@@ -223,8 +223,8 @@ export const directusServer = {
   },
 
   /**
-   * Update a space (admin only) — used for the seasonal booking window
-   * (bookable_from / bookable_to).
+   * Update a space (admin only) — name, description, location (GeoJSON Point),
+   * time_slots, and the seasonal window (bookable_from / bookable_to).
    */
   async updateSpace(id: string, data: any, token: string) {
     return directusRequest<{ data: any }>(
@@ -236,6 +236,40 @@ export const directusServer = {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(data),
+      }
+    );
+  },
+
+  /**
+   * Create a space (admin only).
+   */
+  async createSpace(data: any, token: string) {
+    return directusRequest<{ data: any }>(
+      `/items/spaces`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(data),
+      }
+    );
+  },
+
+  /**
+   * Delete a space (admin only). Directus rejects this if bookings still
+   * reference it (FK constraint) — that error is surfaced to the caller.
+   */
+  async deleteSpace(id: string, token: string) {
+    return directusRequest<{ data: any }>(
+      `/items/spaces/${id}`,
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
       }
     );
   },

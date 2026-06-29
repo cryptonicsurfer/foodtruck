@@ -834,14 +834,22 @@ export async function adminUpdateFoodTruck(id: string, data: { name?: string; de
   }
 }
 
+type SpaceLocation = { type: "Point"; coordinates: [number, number] } | null
+type SpaceTimeSlot = { start: string; end: string; description?: string }
+type SpaceData = {
+  name?: string
+  description?: string | null
+  location?: SpaceLocation
+  time_slots?: SpaceTimeSlot[]
+  bookable_from?: string | null
+  bookable_to?: string | null
+}
+
 /**
- * Update a space's seasonal booking window (admin only).
- * Pass `null` for a field to clear it (= always bookable on that bound).
+ * Update a space (admin only): name, description, location (GeoJSON Point),
+ * time_slots, and the seasonal window. Pass `null` to clear a nullable field.
  */
-export async function adminUpdateSpace(
-  id: string,
-  data: { bookable_from?: string | null; bookable_to?: string | null }
-) {
+export async function adminUpdateSpace(id: string, data: SpaceData) {
   try {
     const cookieStore = await cookies()
     const token = cookieStore.get('access_token')?.value
@@ -868,6 +876,72 @@ export async function adminUpdateSpace(
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to update space'
+    }
+  }
+}
+
+/**
+ * Create a space (admin only).
+ */
+export async function adminCreateSpace(data: SpaceData) {
+  try {
+    const cookieStore = await cookies()
+    const token = cookieStore.get('access_token')?.value
+
+    if (!token) {
+      return { success: false, error: 'Not authenticated' }
+    }
+
+    const userResult = await directusServer.getCurrentUserWithRole(token)
+    if (!ADMIN_ROLES.includes(userResult.data.role?.name || '')) {
+      return { success: false, error: 'Unauthorized' }
+    }
+
+    const response = await directusServer.createSpace(data, token)
+
+    revalidatePath('/admin')
+    revalidatePath('/booking')
+    revalidateTag('bookings')
+
+    return { success: true, data: response.data }
+  } catch (error) {
+    console.error('Admin create space error:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to create space'
+    }
+  }
+}
+
+/**
+ * Delete a space (admin only). Fails if bookings still reference it.
+ */
+export async function adminDeleteSpace(id: string) {
+  try {
+    const cookieStore = await cookies()
+    const token = cookieStore.get('access_token')?.value
+
+    if (!token) {
+      return { success: false, error: 'Not authenticated' }
+    }
+
+    const userResult = await directusServer.getCurrentUserWithRole(token)
+    if (!ADMIN_ROLES.includes(userResult.data.role?.name || '')) {
+      return { success: false, error: 'Unauthorized' }
+    }
+
+    await directusServer.deleteSpace(id, token)
+
+    revalidatePath('/admin')
+    revalidatePath('/booking')
+    revalidateTag('bookings')
+
+    return { success: true }
+  } catch (error) {
+    console.error('Admin delete space error:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to delete space'
     }
   }
 }
@@ -970,6 +1044,12 @@ export async function adminUpdateBookingRules(data: {
 
     if (!token) {
       return { success: false, error: 'Not authenticated' }
+    }
+
+    // Verify admin role
+    const userResult = await directusServer.getCurrentUserWithRole(token)
+    if (!ADMIN_ROLES.includes(userResult.data.role?.name || '')) {
+      return { success: false, error: 'Unauthorized' }
     }
 
     const response = await directusServer.updateBookingRules(data, token)
