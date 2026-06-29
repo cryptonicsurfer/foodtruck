@@ -330,7 +330,7 @@ export const directusServer = {
     const encodedEndDate = encodeURIComponent(endDate);
     
     return directusRequest<{ data: any[] }>(
-      `/items/foodtruck_bookings?filter[start][_between]=[${encodedStartDate},${encodedEndDate}]&fields=*,space.*,foodtruck.*`,
+      `/items/foodtruck_bookings?filter[start][_between]=[${encodedStartDate},${encodedEndDate}]&fields=*,space.*,foodtruck.*&sort=start&limit=-1`,
       {
         headers: {
           "Content-Type": "application/json",

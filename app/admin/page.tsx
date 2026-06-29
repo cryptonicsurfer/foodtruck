@@ -358,9 +358,12 @@ export default function AdminPage() {
       .map((d: any) => d.date)
   })()
 
+  // Parse date/hour straight from the stored string (e.g. "2026-06-29T10:00:00") so we never
+  // shift across midnight via the local timezone — same approach as createBooking() in actions.ts.
+  const dateOf = (start: string): string => start.slice(0, 10)
   // morning: starts before 16:00, evening: 16:00 onwards (matches available-slots-dialog)
   const slotOf = (start: string): "morning" | "evening" =>
-    new Date(start).getHours() < 16 ? "morning" : "evening"
+    parseInt(start.slice(11, 13), 10) < 16 ? "morning" : "evening"
 
   // Full food-truck info (image, owner, description) keyed by id — reused for the schedule thumbnails/preview
   const foodTruckById = (() => {
@@ -374,7 +377,7 @@ export default function AdminPage() {
     const groups: Record<string, { foodtruck: string; foodtruckId: string; space: string; slot: "morning" | "evening"; start: string }[]> = {}
     for (const b of scheduleBookings) {
       if (!b.start) continue
-      const dateKey = format(new Date(b.start), "yyyy-MM-dd")
+      const dateKey = dateOf(b.start)
       if (scheduleFrom && dateKey < scheduleFrom) continue
       if (scheduleTo && dateKey > scheduleTo) continue
       const spaceId = String(b.space?.id ?? b.space ?? "")
@@ -645,7 +648,7 @@ export default function AdminPage() {
                           {scheduleByDate.map(({ date, items }) => (
                             <div key={date}>
                               <h3 className="font-semibold capitalize border-b pb-2 mb-3">
-                                {format(new Date(date), "EEEE d MMMM yyyy", { locale: sv })}
+                                {format(new Date(`${date}T12:00:00`), "EEEE d MMMM yyyy", { locale: sv })}
                                 <span className="ml-2 text-sm font-normal text-muted-foreground">
                                   {items.length} {items.length === 1 ? "bokning" : "bokningar"}
                                 </span>
@@ -1435,7 +1438,7 @@ export default function AdminPage() {
                       <div className="flex items-center gap-2">
                         <Calendar size={15} className="text-muted-foreground shrink-0" />
                         <span className="capitalize">
-                          {format(new Date(scheduleDetail.date), "EEEE d MMMM yyyy", { locale: sv })}
+                          {format(new Date(`${scheduleDetail.date}T12:00:00`), "EEEE d MMMM yyyy", { locale: sv })}
                         </span>
                       </div>
                       <div className="flex items-center gap-2">

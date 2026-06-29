@@ -54,7 +54,11 @@ EnvProvider → QueryProvider → AuthProvider → MapsProvider
 Leftmost admin tab. A read-only roster so a parking officer (parkeringsvakt) can
 see, per day and space, which foodtruck gets to stand where. Bookings (today →
 +12 months) are lazy-loaded via `getBookingsForDateRange()` the first time the
-tab is opened (and re-fetchable with "Uppdatera"). Filters: from-date (default
+tab is opened (and re-fetchable with "Uppdatera"). NB: that Directus query is
+pinned to `sort=start&limit=-1` — without `limit=-1` Directus caps at 100 rows,
+which silently dropped whole days from busy ranges. Date and slot are parsed
+straight from the raw start string (`start.slice(0,10)` / hour `slice(11,13)`),
+not `new Date()`, to avoid timezone midnight-shifts. Filters: from-date (default
 today), optional to-date, and space. Rows are grouped by date (ascending),
 then sorted by space name then slot. Slot is derived from the booking start hour
 (`<16` → morning, else evening — same rule as `available-slots-dialog.tsx`),
