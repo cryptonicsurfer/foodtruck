@@ -4,6 +4,7 @@ import { AuthProvider } from "@/lib/auth-context";
 import { EnvProvider } from "@/components/env-provider";
 import QueryProvider from "@/lib/query-provider";
 import { MapsProvider } from "@/lib/maps-context";
+import { Toaster } from "@/components/ui/toaster";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -40,7 +41,7 @@ export default function RootLayout({
             </AuthProvider>
           </QueryProvider>
         </EnvProvider>
-        <div id="toast-container" />
+        <Toaster />
       </body>
     </html>
   );

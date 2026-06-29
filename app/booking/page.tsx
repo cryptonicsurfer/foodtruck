@@ -34,6 +34,7 @@ export default function BookingPage() {
   const [spaces, setSpaces] = useState<any[]>([])
   const [bookings, setBookings] = useState<any[]>([])
   const [userFoodTruck, setUserFoodTruck] = useState<any>(null)
+  const [userLoaded, setUserLoaded] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState("")
   const [isBooking, setIsBooking] = useState(false)
@@ -192,16 +193,21 @@ export default function BookingPage() {
           await loadBookingRulesAndFutureBookings(result.data.id)
         } else if (result.error) {
           console.error("Error loading food truck:", result.error)
-          if (result.error.includes("Invalid email or password") || 
+          if (result.error.includes("Invalid email or password") ||
               result.error.includes("Not authenticated")) {
             setError("Authentication error. Please log in again.")
           }
         }
       } catch (err) {
         console.error("Error loading food truck data:", err)
+      } finally {
+        setUserLoaded(true)
+        // No foodtruck → the rules loader never runs; stop the spinner so it
+        // doesn't hang on "Loading…" forever.
+        setLoadingRules(false)
       }
     }
-    
+
     loadUserData()
   }, [])
 
@@ -382,8 +388,8 @@ export default function BookingPage() {
 
     if (!userFoodTruck) {
       toast({
-        title: "Food truck not found",
-        description: "You need a registered food truck to make bookings",
+        title: "Ingen foodtruck kopplad",
+        description: "Ditt konto har ingen foodtruck. Bokning är till för foodtruck-ägare.",
         variant: "destructive"
       })
       return
@@ -633,6 +639,15 @@ export default function BookingPage() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="flex-1 overflow-auto">
+                    {userLoaded && !userFoodTruck && (
+                      <div className="mb-4 flex items-start gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-3">
+                        <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                        <span>
+                          Ditt konto har ingen foodtruck kopplad, så du kan inte göra bokningar här.
+                          Bokning är till för foodtruck-ägare — logga in med ett foodtruck-konto för att boka.
+                        </span>
+                      </div>
+                    )}
                     {isLoading ? (
                       <div className="flex justify-center items-center py-8">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
