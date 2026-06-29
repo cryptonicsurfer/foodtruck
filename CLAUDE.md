@@ -39,7 +39,7 @@ EnvProvider → QueryProvider → AuthProvider → MapsProvider
 
 **Collections:**
 - `foodtrucks` - id, name, user (FK to Directus user), bookings relation
-- `spaces` - id, name, location (geographic point), time_slots, bookings relation
+- `spaces` - id, name, location (geographic point), time_slots, bookings relation, `bookable_from`/`bookable_to` (date, nullable — seasonal booking window; null = always bookable)
 - `foodtruck_bookings` - id, foodtruck (FK), space (FK), start, end datetimes
 - `foodtruck_rules` - Booking rules (max_future_bookings, max_days_ahead, last_minute_booking_hours)
 - `space_blocked_dates` - id, space (FK), date (`yyyy-MM-dd`), time_slot (`morning` | `evening` | `all_day`), reason?, status (`published` | `archived`). Admin-managed; `createBooking()` rejects bookings via `isSpaceBlocked()` before they're created. Independent of `foodtruck_rules`.
@@ -75,6 +75,29 @@ descriptions), so it uses the tall-dialog centering fix (see Gotchas):
 `style={{ maxHeight: "92vh", translate: "none", transform: "translate(-50%,-50%)" }}`
 with `flex flex-col`, a `shrink-0` hero image, and a `flex-1 min-h-0
 overflow-y-auto` scrollable body.
+
+### Admin: seasonal booking windows (`/admin` → "Platser")
+
+Spaces can be limited to a bookable date range via `spaces.bookable_from` /
+`bookable_to` (date, nullable; null = always bookable). The "Platser" tab
+(Head of Foodtruck only) edits them per space via `adminUpdateSpace()`. The
+date inputs are gated behind a "Begränsa bokningsbar period" checkbox —
+unchecked = "Ingen begränsning" — because a native empty `<input type=date>`
+paints today's date as a placeholder (Safari) and looks misleadingly filled.
+The booking page disables out-of-window slots (`seasonStatus()`, amber
+"Bokningsbar DD/MM–DD/MM" note) and `createBooking()` enforces it server-side.
+All date comparisons use raw `yyyy-MM-dd` strings (timezone-safe). Permissions:
+the "Head of food truck spaces" Directus policy already grants `spaces.update`;
+regular "Food truck" policy only has `spaces.read`.
+
+**Why a Directus restart was needed once:** the two columns + their
+`directus_fields` rows were added straight to the DB via SQL (to avoid touching
+the shared CMS through its API mid-session). Directus loads its schema at boot
+and won't notice direct DB schema changes until restarted — so a one-time
+`docker restart directus-directus-1` was required to expose the fields (this
+briefly interrupts auth across the whole VPS app fleet — Directus is the shared
+auth backend). Future field additions should ideally go through the Directus
+admin UI/API instead, which hot-reloads the schema.
 
 ### Admin: blocked dates (`/admin` → "Spärrade datum")
 
