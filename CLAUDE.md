@@ -89,19 +89,41 @@ descriptions), so it uses the tall-dialog centering fix (see Gotchas):
 with `flex flex-col`, a `shrink-0` hero image, and a `flex-1 min-h-0
 overflow-y-auto` scrollable body.
 
-### Admin: seasonal booking windows (`/admin` → "Platser")
+### Admin: space management (`/admin` → "Platser")
 
-Spaces can be limited to a bookable date range via `spaces.bookable_from` /
-`bookable_to` (date, nullable; null = always bookable). The "Platser" tab
-(Head of Foodtruck only) edits them per space via `adminUpdateSpace()`. The
-date inputs are gated behind a "Begränsa bokningsbar period" checkbox —
-unchecked = "Ingen begränsning" — because a native empty `<input type=date>`
-paints today's date as a placeholder (Safari) and looks misleadingly filled.
-The booking page disables out-of-window slots (`seasonStatus()`, amber
-"Bokningsbar DD/MM–DD/MM" note) and `createBooking()` enforces it server-side.
-All date comparisons use raw `yyyy-MM-dd` strings (timezone-safe). Permissions:
-the "Head of food truck spaces" Directus policy already grants `spaces.update`;
-regular "Food truck" policy only has `spaces.read`.
+Full space CRUD in-app so colleagues never need Directus for spaces. The
+"Platser" tab lists spaces (coordinate-set?, # time_slots, season summary) with
+**Skapa plats** / **Redigera** / **Ta bort**. Create/edit open `SpaceDialog`
+(`components/space-dialog.tsx`): name, description, a **Google Maps
+click-to-set coordinate picker** (`components/space-location-picker.tsx`,
+reuses the app's working Maps via `useMapsApi` — deliberately NOT the Directus
+OSM widget), a `time_slots` editor (rows of `HH:MM` start/end + description),
+and the seasonal window. Saves go through `adminCreateSpace` / `adminUpdateSpace`
+(broadened to name/description/location/time_slots/bookable_*). `location` is
+written as a GeoJSON `Point` `{type:"Point", coordinates:[lng,lat]}`; read back
+the same way (`coordinates[1]`=lat). Delete uses `<ConfirmDialog>` with
+`requireText="bekräfta"` (`adminDeleteSpace`; fails if bookings reference it).
+Permissions: the "Head of food truck spaces" policy grants create/update/delete
+on spaces; regular "Food truck" policy is read-only.
+
+**Seasonal window**: `spaces.bookable_from` / `bookable_to` (date, nullable;
+null = always bookable), edited in `SpaceDialog` behind a "Begränsa bokningsbar
+period" checkbox (unchecked = no limit — avoids Safari painting today into an
+empty `<input type=date>`). The booking page disables out-of-window slots
+(`seasonStatus()`, amber "Bokningsbar DD/MM–DD/MM") and `createBooking()`
+enforces it server-side. All date comparisons use raw `yyyy-MM-dd` strings.
+
+### Admin: booking rules (`/admin` → "Inställningar")
+
+The `foodtruck_rules` singleton (max future bookings, max days ahead,
+last-minute hours) is **editable in-app** via `adminUpdateBookingRules()` —
+no longer Directus-only. Save routes through a plain `<ConfirmDialog>` ("vill du
+göra dessa ändringar?"). The "Head of food truck spaces" policy grants
+`foodtruck_rules.update`.
+
+**Confirm pattern**: `components/confirm-dialog.tsx` — reusable; `requireText`
+forces typing an exact word (e.g. "bekräfta") before the confirm button enables.
+Used for destructive actions; plain (no `requireText`) for sensitive saves.
 
 **Why a Directus restart was needed once:** the two columns + their
 `directus_fields` rows were added straight to the DB via SQL (to avoid touching
