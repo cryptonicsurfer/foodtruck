@@ -34,6 +34,7 @@ import {
   adminUpdateFoodTruck,
   adminGetSpaceBlockedDates,
   adminCreateSpaceBlockedDate,
+  adminUpdateSpace,
   adminDeleteSpaceBlockedDate,
   adminGetUsersWithoutFoodTruck,
   adminCreateFoodTruckUser,
@@ -75,6 +76,8 @@ interface BlockedDate {
 interface Space {
   id: number
   name: string
+  bookable_from?: string | null
+  bookable_to?: string | null
 }
 
 interface AvailableUser {
@@ -131,6 +134,9 @@ export default function AdminPage() {
   const [scheduleDetail, setScheduleDetail] = useState<
     { date: string; space: string; slot: "morning" | "evening"; foodtruckId: string; foodtruckName: string } | null
   >(null)
+  // Per-space season-window edits: { [spaceId]: { from, to } } (yyyy-MM-dd strings, "" = open)
+  const [seasonEdits, setSeasonEdits] = useState<Record<string, { from: string; to: string }>>({})
+  const [savingSeason, setSavingSeason] = useState<string | null>(null)
 
   // Document dialog states
   const [addDocumentDialog, setAddDocumentDialog] = useState(false)
@@ -328,6 +334,40 @@ export default function AdminPage() {
     })
     return () => { cancelled = true }
   }, [blockDateDialog, blockMode, newBlockedDate.space])
+
+  // Seed the season-window editor from loaded spaces (resets on reload)
+  useEffect(() => {
+    const init: Record<string, { from: string; to: string }> = {}
+    for (const s of spaces) {
+      init[String(s.id)] = {
+        from: s.bookable_from ? String(s.bookable_from).slice(0, 10) : "",
+        to: s.bookable_to ? String(s.bookable_to).slice(0, 10) : "",
+      }
+    }
+    setSeasonEdits(init)
+  }, [spaces])
+
+  const handleSaveSeason = async (space: Space) => {
+    const edit = seasonEdits[String(space.id)] || { from: "", to: "" }
+    if (edit.from && edit.to && edit.from > edit.to) {
+      setError("Från-datum måste vara före till-datum")
+      return
+    }
+    setSavingSeason(String(space.id))
+    const result = await adminUpdateSpace(String(space.id), {
+      bookable_from: edit.from || null,
+      bookable_to: edit.to || null,
+    })
+    if (result.success) {
+      setSpaces(prev => prev.map(s =>
+        s.id === space.id ? { ...s, bookable_from: edit.from || null, bookable_to: edit.to || null } : s
+      ))
+      setError(null)
+    } else {
+      setError(result.error || "Kunde inte spara säsong")
+    }
+    setSavingSeason(null)
+  }
 
   // Bookings for the chosen space, keyed by "yyyy-MM-dd" → [{ foodtruck, space }]
   const periodBookingsByDate = (() => {
@@ -568,6 +608,10 @@ export default function AdminPage() {
                   <TabsTrigger value="blocked" className="flex items-center gap-2 flex-1">
                     <CalendarOff size={16} />
                     <span className="hidden sm:inline">Spärrade datum</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="spaces" className="flex items-center gap-2 flex-1">
+                    <MapPin size={16} />
+                    <span className="hidden sm:inline">Platser</span>
                   </TabsTrigger>
                   <TabsTrigger value="documents" className="flex items-center gap-2 flex-1">
                     <FileText size={16} />
@@ -844,6 +888,93 @@ export default function AdminPage() {
                           ))}
                           {blockedDates.length === 0 && (
                             <p className="text-center text-muted-foreground py-8">Inga spärrade datum</p>
+                          )}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                {/* Spaces / season window Tab */}
+                <TabsContent value="spaces">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Platser & säsong</CardTitle>
+                      <CardDescription>
+                        Sätt en bokningsbar datumperiod per plats. Lämna tomt = alltid bokningsbar.
+                        Utanför perioden kan foodtrucks inte boka platsen.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {isLoading ? (
+                        <div className="space-y-4">
+                          {[1, 2, 3].map(i => <Skeleton key={i} className="h-20 w-full" />)}
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {spaces.map(space => {
+                            const edit = seasonEdits[String(space.id)] || { from: "", to: "" }
+                            const dirty =
+                              edit.from !== (space.bookable_from ? String(space.bookable_from).slice(0, 10) : "") ||
+                              edit.to !== (space.bookable_to ? String(space.bookable_to).slice(0, 10) : "")
+                            return (
+                              <div key={space.id} className="p-4 rounded-lg border">
+                                <div className="flex items-center justify-between gap-2 mb-3">
+                                  <h3 className="font-medium">{space.name}</h3>
+                                  {!edit.from && !edit.to && (
+                                    <span className="text-xs text-muted-foreground">Alltid bokningsbar</span>
+                                  )}
+                                </div>
+                                <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+                                  <div className="space-y-1 flex-1">
+                                    <Label htmlFor={`from-${space.id}`} className="text-xs">Bokningsbar från</Label>
+                                    <Input
+                                      id={`from-${space.id}`}
+                                      type="date"
+                                      value={edit.from}
+                                      onChange={(e) => setSeasonEdits(prev => ({
+                                        ...prev,
+                                        [String(space.id)]: { ...edit, from: e.target.value },
+                                      }))}
+                                    />
+                                  </div>
+                                  <div className="space-y-1 flex-1">
+                                    <Label htmlFor={`to-${space.id}`} className="text-xs">Bokningsbar till</Label>
+                                    <Input
+                                      id={`to-${space.id}`}
+                                      type="date"
+                                      value={edit.to}
+                                      onChange={(e) => setSeasonEdits(prev => ({
+                                        ...prev,
+                                        [String(space.id)]: { ...edit, to: e.target.value },
+                                      }))}
+                                    />
+                                  </div>
+                                  <div className="flex gap-2">
+                                    {(edit.from || edit.to) && (
+                                      <Button
+                                        variant="outline"
+                                        onClick={() => setSeasonEdits(prev => ({
+                                          ...prev,
+                                          [String(space.id)]: { from: "", to: "" },
+                                        }))}
+                                      >
+                                        Rensa
+                                      </Button>
+                                    )}
+                                    <Button
+                                      onClick={() => handleSaveSeason(space)}
+                                      disabled={!dirty || savingSeason === String(space.id)}
+                                    >
+                                      {savingSeason === String(space.id) ? "Sparar…" : "Spara"}
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          })}
+                          {spaces.length === 0 && (
+                            <p className="text-center text-muted-foreground py-8">Inga platser hittades</p>
                           )}
                         </div>
                       )}

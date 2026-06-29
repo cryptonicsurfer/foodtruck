@@ -353,6 +353,23 @@ export default function BookingPage() {
     return { blocked: false }
   }
 
+  // Check whether the selected date falls outside a space's seasonal booking
+  // window (bookable_from / bookable_to). Either bound may be null = open-ended.
+  const seasonStatus = (space: any): { outside: boolean; label?: string } => {
+    if (!date) return { outside: false }
+    const from = space?.bookable_from ? String(space.bookable_from).slice(0, 10) : null
+    const to = space?.bookable_to ? String(space.bookable_to).slice(0, 10) : null
+    if (!from && !to) return { outside: false }
+    const d = format(date, 'yyyy-MM-dd')
+    const outside = Boolean((from && d < from) || (to && d > to))
+    if (!outside) return { outside: false }
+    const sv = (x: string) => x.split('-').reverse().join('/') // yyyy-MM-dd → dd/MM/yyyy
+    const label = from && to
+      ? `Bokningsbar ${sv(from)}–${sv(to)}`
+      : from ? `Bokningsbar från ${sv(from)}` : `Bokningsbar till ${sv(to!)}`
+    return { outside: true, label }
+  }
+
   // Get count of blocked spaces for a specific date (for calendar indicator)
   const getBlockedCountForDate = (checkDate: Date): number => {
     const dateStr = format(checkDate, 'yyyy-MM-dd')
@@ -626,11 +643,13 @@ export default function BookingPage() {
                       </div>
                     ) : (
                       <div className="space-y-4 max-h-[65vh] md:max-h-full overflow-auto pr-1">
-                        {spaces.map((space) => (
+                        {spaces.map((space) => {
+                          const season = seasonStatus(space)
+                          return (
                           <div key={space.id} className="bg-card rounded-md shadow-sm p-4">
                             <div className="flex justify-between items-start mb-2">
                               <div className="w-full">
-                                <div 
+                                <div
                                   className="flex items-center justify-between cursor-pointer hover:text-primary transition-colors"
                                   onClick={() => router.push(`/spaces/${space.id}`)}
                                 >
@@ -642,7 +661,14 @@ export default function BookingPage() {
                                 </p>
                               </div>
                             </div>
-                            
+
+                            {season.outside && (
+                              <div className="mt-1 flex items-center gap-1.5 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                                <CalendarIcon size={14} className="shrink-0" />
+                                <span>{season.label} — ej bokningsbar valt datum</span>
+                              </div>
+                            )}
+
                             <Separator className="my-3" />
                             
                             <div className="space-y-3">
@@ -678,7 +704,12 @@ export default function BookingPage() {
                                         </div>
                                       </div>
 
-                                      {blockStatus.blocked ? (
+                                      {season.outside ? (
+                                        <div className="flex items-center text-sm text-amber-600">
+                                          <CalendarIcon size={14} className="mr-1" />
+                                          <span>Ej bokningsbar</span>
+                                        </div>
+                                      ) : blockStatus.blocked ? (
                                         <div className="flex items-center text-sm text-red-600">
                                           <Ban size={14} className="mr-1" />
                                           <span>Spärrad{blockStatus.reason ? `: ${blockStatus.reason}` : ''}</span>
@@ -768,7 +799,8 @@ export default function BookingPage() {
                               </div>
                             </div>
                           </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     )}
                   </CardContent>

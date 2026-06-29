@@ -221,6 +221,24 @@ export const directusServer = {
       }
     );
   },
+
+  /**
+   * Update a space (admin only) — used for the seasonal booking window
+   * (bookable_from / bookable_to).
+   */
+  async updateSpace(id: string, data: any, token: string) {
+    return directusRequest<{ data: any }>(
+      `/items/spaces/${id}`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(data),
+      }
+    );
+  },
   
   /**
    * Upload file to Directus

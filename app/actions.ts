@@ -496,6 +496,26 @@ export async function createBooking(bookingData: {
 
     // Check if the space is blocked for this date
     const bookingDate = bookingData.start.split('T')[0] // Extract YYYY-MM-DD
+
+    // Enforce the space's seasonal booking window (bookable_from / bookable_to).
+    // Either bound may be null = open-ended. Compared as plain yyyy-MM-dd strings.
+    try {
+      const spaceResult = await directusServer.getSpace(bookingData.space, token)
+      const space = spaceResult.data
+      const from: string | null = space?.bookable_from ? String(space.bookable_from).slice(0, 10) : null
+      const to: string | null = space?.bookable_to ? String(space.bookable_to).slice(0, 10) : null
+      if ((from && bookingDate < from) || (to && bookingDate > to)) {
+        const sv = (d: string) => d.split('-').reverse().join('/') // yyyy-MM-dd → dd/MM/yyyy
+        const window = from && to ? `${sv(from)}–${sv(to)}` : from ? `från ${sv(from)}` : `till ${sv(to!)}`
+        return {
+          success: false,
+          error: `Denna plats är endast bokningsbar ${window}`
+        }
+      }
+    } catch (e) {
+      console.error('Seasonal window check failed (allowing booking):', e)
+    }
+
     const bookingHour = bookingStartDate.getHours()
     // Morning slot is 06:00-15:00, Evening slot is 16:00-03:00
     const timeSlot: "morning" | "evening" = bookingHour < 16 ? "morning" : "evening"
@@ -810,6 +830,44 @@ export async function adminUpdateFoodTruck(id: string, data: { name?: string; de
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to update food truck'
+    }
+  }
+}
+
+/**
+ * Update a space's seasonal booking window (admin only).
+ * Pass `null` for a field to clear it (= always bookable on that bound).
+ */
+export async function adminUpdateSpace(
+  id: string,
+  data: { bookable_from?: string | null; bookable_to?: string | null }
+) {
+  try {
+    const cookieStore = await cookies()
+    const token = cookieStore.get('access_token')?.value
+
+    if (!token) {
+      return { success: false, error: 'Not authenticated' }
+    }
+
+    // Verify admin role
+    const userResult = await directusServer.getCurrentUserWithRole(token)
+    if (!ADMIN_ROLES.includes(userResult.data.role?.name || '')) {
+      return { success: false, error: 'Unauthorized' }
+    }
+
+    const response = await directusServer.updateSpace(id, data, token)
+
+    revalidatePath('/admin')
+    revalidatePath('/booking')
+    revalidateTag('bookings')
+
+    return { success: true, data: response.data }
+  } catch (error) {
+    console.error('Admin update space error:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to update space'
     }
   }
 }
