@@ -39,6 +39,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   amber "ingen foodtruck kopplad" banner (gated by a `userLoaded` flag) instead
   of letting them book. To test the booking flow, log in as a foodtruck account.
 - Admin roles (`/admin` access): `ADMIN_ROLES = ['Administrator', 'Head of Foodtruck']` in `app/actions.ts`.
+- **Email**: the app sends no mail itself — password-reset goes through Directus
+  (`/auth/password/request`). Directus is configured for **Gmail SMTP**
+  (`smtp.gmail.com:465`, SSL) from **`businessfalkenberg@gmail.com`** with a
+  Gmail app-password (the MS365 route was never set up — consultants blocked
+  access). Config + SMTP reachability verified 2026-06; actual delivery not
+  load-tested (no sends in 30 days). To test: trigger a reset and tail
+  `docker logs directus-directus-1` for SMTP errors.
 
 **Provider Hierarchy** (in `app/layout.tsx`):
 ```
