@@ -1,5 +1,6 @@
 services:
   foodtruck:
+    mem_limit: 1024m
     build:
       context: .
       dockerfile: Dockerfile
