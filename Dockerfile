@@ -1,6 +1,6 @@
 # Multi-stage build for the foodtruck Next.js 15 app (standalone output).
 # Uses pnpm (the repo's lockfile is pnpm-lock.yaml) via corepack.
-FROM node:20-slim AS base
+FROM node:22-slim AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
