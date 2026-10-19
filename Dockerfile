@@ -31,6 +31,9 @@ RUN pnpm build
 # ---- runner: minimal production image ----
 FROM base AS runner
 WORKDIR /app
+# Säkerhetsuppdateringar från Debian vid varje bygge — basimagen byggs om uppströms med
+# fördröjning (perl/libpcre2-fixar saknades i node:22-slim 2026-10-19).
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
