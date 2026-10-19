@@ -8,6 +8,8 @@ interface DirectusErrorResponse {
 }
 
 const DIRECTUS_URL = serverEnv.DIRECTUS_URL;
+// Mappen "foodtruck" i cms.businessfalkenberg.se — den enda som är publikt läsbar.
+export const FOODTRUCK_FOLDER_ID = "d4d54e82-a2b2-4a96-babc-d44c4e9e55ec";
 
 /**
  * Create a Directus request with proper error handling
@@ -280,7 +282,16 @@ export const directusServer = {
   async uploadFile(formData: FormData, token: string) {
     // Special case for file uploads - we need to use FormData
     const url = `${DIRECTUS_URL}/files`;
-    
+
+    // Alltid i mappen "foodtruck": den publika rollen i Directus får bara läsa filer där
+    // (sedan 2026-10-19), och bilderna visas för utloggade besökare. Directus kräver att
+    // fälten kommer före filen i multipart-kroppen, så kroppen byggs om här.
+    const file = formData.get("file");
+    if (!file) throw new Error("Ingen fil i uppladdningen");
+    const body = new FormData();
+    body.append("folder", FOODTRUCK_FOLDER_ID);
+    body.append("file", file);
+
     try {
       console.log(`Uploading file to: ${url}`);
       const response = await fetch(url, {
@@ -289,7 +300,7 @@ export const directusServer = {
           Authorization: `Bearer ${token}`,
           // Note: Don't set Content-Type header for FormData
         },
-        body: formData,
+        body,
       });
       
       if (!response.ok) {
