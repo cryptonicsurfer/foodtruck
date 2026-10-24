@@ -59,6 +59,11 @@ VPS `.env` or the Cloud Console key. The map will not render until this is set.
 
 ## Step 3 — build & run the container
 
+> `.env` is excluded by `.dockerignore` and never baked into the image (2026-10-24).
+> `NEXT_PUBLIC_*` reach the build as build-args (compose substitutes them from
+> `.env`), the rest arrives at runtime via `env_file`. After a rebuild, remove the
+> previous image: `docker image ls foodtruck-foodtruck` → `docker image rm <old id>`.
+
 ```bash
 cd ~/foodtruck
 docker compose up -d --build

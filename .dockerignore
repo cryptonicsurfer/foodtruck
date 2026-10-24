@@ -1,11 +1,25 @@
+# Hemligheter och lokala filer ska aldrig in i imagen (COPY . . i Dockerfile).
+# 2026-10-24: utan .env här byggdes .env in i imagen — next build läser den och
+# standalone-outputen kopierar den till /app/.env. NEXT_PUBLIC_* kommer i stället
+# som build-args (docker-compose.yml), resten via env_file vid körning.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.git
+.github
+.vercel
 node_modules
 .next
-.git
-.vercel
+.claude
+coverage
+*.log
 npm-debug.log*
 .pnpm-debug.log*
 .DS_Store
 README.md
 CLAUDE.md
-.claude
+DEPLOY.md
+specs
 *.tsbuildinfo
