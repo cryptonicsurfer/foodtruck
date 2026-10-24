@@ -18,10 +18,17 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # NEXT_PUBLIC_* values are inlined at build time, so they must be present now.
+# APP_URL/DIRECTUS_URL too: next.config.ts `env:` inlines them (server code
+# included), so runtime env_file does not reach them. .env is not in the build
+# context (.dockerignore) — everything comes in as build-args from compose.
+ARG APP_URL
+ARG DIRECTUS_URL
 ARG NEXT_PUBLIC_DIRECTUS_URL
 ARG NEXT_PUBLIC_APP_URL
 ARG NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 ARG NEXT_PUBLIC_GOOGLE_MAP_ID
+ENV APP_URL=$APP_URL
+ENV DIRECTUS_URL=$DIRECTUS_URL
 ENV NEXT_PUBLIC_DIRECTUS_URL=$NEXT_PUBLIC_DIRECTUS_URL
 ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
 ENV NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=$NEXT_PUBLIC_GOOGLE_MAPS_API_KEY

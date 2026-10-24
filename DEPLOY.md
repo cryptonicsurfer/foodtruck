@@ -60,9 +60,12 @@ VPS `.env` or the Cloud Console key. The map will not render until this is set.
 ## Step 3 — build & run the container
 
 > `.env` is excluded by `.dockerignore` and never baked into the image (2026-10-24).
-> `NEXT_PUBLIC_*` reach the build as build-args (compose substitutes them from
-> `.env`), the rest arrives at runtime via `env_file`. After a rebuild, remove the
-> previous image: `docker image ls foodtruck-foodtruck` → `docker image rm <old id>`.
+> `NEXT_PUBLIC_*`, `APP_URL` and `DIRECTUS_URL` reach the build as build-args
+> (compose substitutes them from `.env`). All of them are inlined at build time —
+> `APP_URL`/`DIRECTUS_URL` via `next.config.ts` `env:`, server code included — so
+> changing one in `.env` needs a rebuild, not just a restart. After a rebuild,
+> remove the previous image (`docker image ls foodtruck-foodtruck` →
+> `docker image rm <old id>`) and run `docker builder prune -f`.
 
 ```bash
 cd ~/foodtruck
