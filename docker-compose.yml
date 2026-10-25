@@ -4,9 +4,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      # NEXT_PUBLIC_* are inlined at build time. Compose auto-loads the sibling
-      # .env file for these ${...} substitutions.
+      # NEXT_PUBLIC_* are inlined at build time, and so are APP_URL/DIRECTUS_URL
+      # (next.config.ts `env:`). Compose auto-loads the sibling .env file for
+      # these ${...} substitutions; .env itself is kept out of the image.
       args:
+        APP_URL: ${APP_URL}
+        DIRECTUS_URL: ${DIRECTUS_URL}
         NEXT_PUBLIC_DIRECTUS_URL: ${NEXT_PUBLIC_DIRECTUS_URL}
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
         NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
@@ -15,7 +18,8 @@ services:
     # Host 3009 -> container 3000. Bound to localhost; Caddy reverse-proxies it.
     ports:
       - "127.0.0.1:3009:3000"
-    # Runtime env (DIRECTUS_URL, APP_URL, etc.) read by the server at request time.
+    # Runtime env. Note: APP_URL/DIRECTUS_URL are already inlined at build time
+    # (see args above); env_file keeps process.env consistent for anything else.
     env_file:
       - .env
     restart: unless-stopped
