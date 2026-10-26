@@ -594,7 +594,7 @@ export const directusServer = {
    */
   async getSpaceBlockedDates(token: string) {
     return directusRequest<{ data: any[] }>(
-      "/items/space_blocked_dates?fields=*,space.id,space.name&filter[status][_neq]=archived&sort=date",
+      "/items/space_blocked_dates?fields=*,space.id,space.name&filter[status][_neq]=archived&sort=date&limit=-1",
       {
         headers: {
           "Content-Type": "application/json",
