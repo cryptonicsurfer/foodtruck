@@ -3,8 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { AuthProvider } from "@/lib/auth-context";
 import { EnvProvider } from "@/components/env-provider";
 import QueryProvider from "@/lib/query-provider";
-import { MapsProvider } from "@/lib/maps-context";
 import { Toaster } from "@/components/ui/toaster";
+import "maplibre-gl/dist/maplibre-gl.css";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -35,9 +35,7 @@ export default function RootLayout({
         <EnvProvider>
           <QueryProvider>
             <AuthProvider>
-              <MapsProvider>
-                {children}
-              </MapsProvider>
+              {children}
             </AuthProvider>
           </QueryProvider>
         </EnvProvider>

@@ -12,8 +12,6 @@ services:
         DIRECTUS_URL: ${DIRECTUS_URL}
         NEXT_PUBLIC_DIRECTUS_URL: ${NEXT_PUBLIC_DIRECTUS_URL}
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
-        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
-        NEXT_PUBLIC_GOOGLE_MAP_ID: ${NEXT_PUBLIC_GOOGLE_MAP_ID}
     container_name: foodtruck
     # Host 3009 -> container 3000. Bound to localhost; Caddy reverse-proxies it.
     ports:

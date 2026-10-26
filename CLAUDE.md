@@ -15,11 +15,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - React 19 with TanStack Query for data fetching
 - Tailwind CSS 4 with shadcn/ui components (Radix UI primitives)
 - Directus CMS backend at cms.businessfalkenberg.se
-- **Two different maps**: the public booking/spaces map in the app is **Google
-  Maps** (`@react-google-maps/api`, referrer-locked `foodtruck-maps-js` key);
-  the `spaces.location` editor inside **Directus admin** is the CMS's own
-  **OpenStreetMap/MapLibre** widget. Coordinates are stored once as a PostGIS
-  Point (SRID 4326, GeoJSON `[lng, lat]`) and rendered by both.
+- **Maps: MapLibre GL + OpenFreeMap** (since 2026-10-26, replaced Google Maps
+  after its key died). `maplibre-gl` is pinned exactly (`6.13.0`), tiles/style
+  from `tiles.openfreemap.org` (OpenStreetMap data) — **no API key, no billing**.
+  Everything goes through `lib/maplibre.ts` (`loadMaplibre()`, `MAP_STYLE_URL`);
+  switching provider = change that one URL. The `spaces.location` editor inside
+  **Directus admin** is the CMS's own MapLibre/OSM widget. Coordinates are stored
+  once as a PostGIS Point (SRID 4326, GeoJSON `[lng, lat]`) and rendered by both.
 
 ### Key Architectural Patterns
 
@@ -49,7 +51,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Provider Hierarchy** (in `app/layout.tsx`):
 ```
-EnvProvider → QueryProvider → AuthProvider → MapsProvider
+EnvProvider → QueryProvider → AuthProvider
 ```
 The shadcn `<Toaster />` is also mounted in `app/layout.tsx` (after the
 providers). It must stay mounted — without it, every `toast()` call across the
@@ -101,10 +103,8 @@ overflow-y-auto` scrollable body.
 Full space CRUD in-app so colleagues never need Directus for spaces. The
 "Platser" tab lists spaces (coordinate-set?, # time_slots, season summary) with
 **Skapa plats** / **Redigera** / **Ta bort**. Create/edit open `SpaceDialog`
-(`components/space-dialog.tsx`): name, description, a **Google Maps
-click-to-set coordinate picker** (`components/space-location-picker.tsx`,
-reuses the app's working Maps via `useMapsApi` — deliberately NOT the Directus
-OSM widget), a `time_slots` editor (rows of `HH:MM` start/end + description),
+(`components/space-dialog.tsx`): name, description, a **MapLibre
+click-to-set coordinate picker** (`components/space-location-picker.tsx`), a `time_slots` editor (rows of `HH:MM` start/end + description),
 and the seasonal window. Saves go through `adminCreateSpace` / `adminUpdateSpace`
 (broadened to name/description/location/time_slots/bookable_*). `location` is
 written as a GeoJSON `Point` `{type:"Point", coordinates:[lng,lat]}`; read back
@@ -166,7 +166,6 @@ The block-date dialog has two modes via a toggle:
 ### Environment Variables
 - `DIRECTUS_URL` / `NEXT_PUBLIC_DIRECTUS_URL` - Directus backend URL
 - `APP_URL` / `NEXT_PUBLIC_APP_URL` - Application URL (for password reset links)
-- Google Maps API key (via EnvProvider)
 
 ## Code Conventions
 - Use `@/` absolute imports
@@ -182,13 +181,28 @@ The block-date dialog has two modes via a toggle:
   which made **every** `toast()` in the app silently no-op — booking success,
   errors, validation, all invisible. If toasts stop showing, check the layout first.
 
-- **Google Maps key is dead (2026-10-26).** The baked-in `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`
-  (`AIza…Xo6w`, Frej's `falkenbergcloud` project) returns "The provided API key is invalid"
-  — key or project deleted — so every map shows "Oops! Something went wrong". Booking
-  still works (lists, not the map). Fix = new referrer-locked Maps JS key in a project we
-  own (see bf-ops `falkenberg-cloud-to-tomas-fbg-kommun-migration.md`), put it in
-  `~/foodtruck/.env` on the VPS and rebuild (it's a build-arg). Quick check:
-  `curl -s "https://maps.googleapis.com/maps/api/geocode/json?address=x&key=<KEY>"`.
+- **MapLibre worker is served from `public/`.** maplibre-gl v6 locates its web
+  worker via `import.meta.url`, which breaks once Next bundles it. `pnpm dev`/`pnpm
+  build` first run `scripts/copy-maplibre-worker.mjs` (copies
+  `maplibre-gl-worker.mjs` into `public/`, gitignored) and `loadMaplibre()` calls
+  `setWorkerUrl()`. Running `next build` directly skips the copy → maps break.
+  Upgrading maplibre-gl: bump the exact version, check the new transitive deps'
+  publish dates (pnpm 10.15 has no `minimumReleaseAge`; fresh ones are pinned in
+  `pnpm.overrides`), rebuild.
+
+- **MapLibre container needs inline width/height.** `maplibre-gl.css` sets
+  `.maplibregl-map { position: relative }`, which beats Tailwind v4's layered
+  `absolute inset-0` → the map collapses to 0 px height (markers render, tiles
+  don't). Size the container with `style={{ height: "100%", width: "100%" }}`
+  inside a sized wrapper, as in `spaces-map.tsx`.
+
+- **If a CSP is ever added for foodtruck in Caddy** (it has none today), allow
+  `connect-src https://tiles.openfreemap.org` and `img-src` for the same host, or
+  the map renders blank. The worker is same-origin, so no `blob:` is needed.
+
+- **Google Maps is gone (2026-10-26).** The old key (`AIza…Xo6w`, Frej's
+  `falkenbergcloud` project) went invalid, which is why we switched. The
+  `NEXT_PUBLIC_GOOGLE_MAPS_*` lines in the VPS `.env` are unused now.
 
 - **Directus `spaces.location` map widget needs a Caddy CSP exception.** The
   Directus map field uses MapLibre GL, which spawns a `blob:` web worker and

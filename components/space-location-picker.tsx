@@ -1,8 +1,8 @@
 "use client"
 
-import { useState } from "react"
-import { GoogleMap, Marker } from "@react-google-maps/api"
-import { useMapsApi } from "@/lib/maps-context"
+import { useEffect, useRef, useState } from "react"
+import type { Map as MaplibreMap, Marker as MaplibreMarker } from "maplibre-gl"
+import { FALKENBERG_CENTER, MAP_STYLE_URL, loadMaplibre } from "@/lib/maplibre"
 import { Button } from "@/components/ui/button"
 import { MapPin } from "lucide-react"
 
@@ -17,12 +17,68 @@ interface SpaceLocationPickerProps {
   height?: string
 }
 
-// Falkenberg centrum
-const DEFAULT_CENTER: LatLng = { lat: 56.9055, lng: 12.4912 }
-
 export function SpaceLocationPicker({ value, onChange, height = "320px" }: SpaceLocationPickerProps) {
-  const { isLoaded, loadError } = useMapsApi()
-  const [center] = useState<LatLng>(value ?? DEFAULT_CENTER)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const markerRef = useRef<MaplibreMarker | null>(null)
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
+  const [map, setMap] = useState<MaplibreMap | null>(null)
+  const [loadError, setLoadError] = useState(false)
+
+  // Create the map once, centered on the current value (or Falkenberg)
+  useEffect(() => {
+    let cancelled = false
+    let instance: MaplibreMap | null = null
+    const start = value ?? FALKENBERG_CENTER
+
+    loadMaplibre()
+      .then((ml) => {
+        if (cancelled || !containerRef.current) return
+        instance = new ml.Map({
+          container: containerRef.current,
+          style: MAP_STYLE_URL,
+          center: [start.lng, start.lat],
+          zoom: value ? 17 : 14,
+          attributionControl: { compact: true },
+        })
+        instance.addControl(new ml.NavigationControl({ showCompass: false }), "top-right")
+        instance.getCanvas().style.cursor = "crosshair"
+        instance.on("click", (e) => onChangeRef.current({ lat: e.lngLat.lat, lng: e.lngLat.lng }))
+        instance.on("load", () => !cancelled && setMap(instance))
+      })
+      .catch((error) => {
+        console.error("Error loading map:", error)
+        if (!cancelled) setLoadError(true)
+      })
+
+    return () => {
+      cancelled = true
+      instance?.remove()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Keep the marker in sync with the value
+  useEffect(() => {
+    if (!map) return
+    if (!value) {
+      markerRef.current?.remove()
+      markerRef.current = null
+      return
+    }
+    if (markerRef.current) {
+      markerRef.current.setLngLat([value.lng, value.lat])
+      return
+    }
+    let cancelled = false
+    loadMaplibre().then((ml) => {
+      if (cancelled) return
+      markerRef.current = new ml.Marker({ color: "#FF5722" }).setLngLat([value.lng, value.lat]).addTo(map)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [map, value])
 
   if (loadError) {
     return (
@@ -32,34 +88,16 @@ export function SpaceLocationPicker({ value, onChange, height = "320px" }: Space
     )
   }
 
-  if (!isLoaded) {
-    return (
-      <div
-        className="flex items-center justify-center rounded-md border bg-muted/40 text-sm text-muted-foreground"
-        style={{ height }}
-      >
-        Laddar karta…
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-2">
-      <GoogleMap
-        mapContainerStyle={{ height, width: "100%", borderRadius: "0.5rem" }}
-        center={center}
-        zoom={value ? 17 : 14}
-        onClick={(e) => {
-          if (e.latLng) onChange({ lat: e.latLng.lat(), lng: e.latLng.lng() })
-        }}
-        options={{
-          streetViewControl: false,
-          mapTypeControl: false,
-          fullscreenControl: false,
-        }}
-      >
-        {value && <Marker position={value} />}
-      </GoogleMap>
+      <div className="relative" style={{ height }}>
+        <div ref={containerRef} className="overflow-hidden rounded-lg" style={{ height: "100%", width: "100%" }} />
+        {!map && (
+          <div className="absolute inset-0 flex items-center justify-center rounded-md border bg-muted/40 text-sm text-muted-foreground">
+            Laddar karta…
+          </div>
+        )}
+      </div>
 
       <div className="flex items-center justify-between gap-2 text-xs">
         <span className="flex items-center gap-1.5 text-muted-foreground">
