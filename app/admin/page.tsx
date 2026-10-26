@@ -1315,17 +1315,13 @@ export default function AdminPage() {
                       selected={periodDates}
                       disabledDates={alreadyBlockedForSelection}
                       bookingsByDate={periodBookingsByDate}
-                      onToggle={(date) =>
-                        setPeriodDates(prev =>
-                          prev.includes(date) ? prev.filter(d => d !== date) : [...prev, date]
-                        )
-                      }
+                      onChange={setPeriodDates}
                     />
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {periodDates.length > 0
                       ? `${periodDates.length} ${periodDates.length === 1 ? "dag" : "dagar"} markerade`
-                      : "Klicka på datum för att markera dem. Bläddra mellan månader med pilarna."}
+                      : "Inga dagar markerade ännu."}
                   </p>
                 </div>
               )}
