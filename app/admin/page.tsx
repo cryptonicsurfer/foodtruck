@@ -406,7 +406,7 @@ export default function AdminPage() {
     for (const b of periodBookings) {
       if (String(b.space?.id ?? b.space) !== newBlockedDate.space) continue
       if (!b.start) continue
-      const key = format(new Date(b.start), "yyyy-MM-dd")
+      const key = String(b.start).slice(0, 10)
       ;(map[key] ||= []).push({
         foodtruck: b.foodtruck?.name ?? "Okänd foodtruck",
         space: b.space?.name ?? "Okänd plats",
@@ -1315,18 +1315,36 @@ export default function AdminPage() {
                       selected={periodDates}
                       disabledDates={alreadyBlockedForSelection}
                       bookingsByDate={periodBookingsByDate}
-                      onToggle={(date) =>
-                        setPeriodDates(prev =>
-                          prev.includes(date) ? prev.filter(d => d !== date) : [...prev, date]
-                        )
-                      }
+                      onChange={setPeriodDates}
                     />
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {periodDates.length > 0
                       ? `${periodDates.length} ${periodDates.length === 1 ? "dag" : "dagar"} markerade`
-                      : "Klicka på datum för att markera dem. Bläddra mellan månader med pilarna."}
+                      : "Inga dagar markerade ännu."}
                   </p>
+                  {(() => {
+                    const bookedSelected = periodDates.filter(d => periodBookingsByDate[d]?.length).sort()
+                    if (bookedSelected.length === 0) return null
+                    return (
+                      <div className="rounded-md border border-amber-400 bg-amber-50 p-3 text-xs text-amber-950">
+                        <p className="font-semibold">
+                          {bookedSelected.length} av de markerade dagarna har redan bokningar.
+                        </p>
+                        <p className="mt-1">
+                          Spärren tar inte bort bokningarna, de ligger kvar. Avmarkera dagarna eller kontakta foodtrucken:
+                        </p>
+                        <ul className="mt-1 space-y-0.5">
+                          {bookedSelected.map(d => (
+                            <li key={d}>
+                              {format(new Date(d + "T12:00:00"), "d MMM", { locale: sv })}:{" "}
+                              {periodBookingsByDate[d].map(b => b.foodtruck).join(", ")}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )
+                  })()}
                 </div>
               )}
             </div>

@@ -16,6 +16,7 @@ import {
   isBefore,
   startOfDay,
   format,
+  parseISO,
 } from "date-fns"
 import { sv } from "date-fns/locale"
 import { ChevronLeft, ChevronRight, Check } from "lucide-react"
@@ -33,7 +34,7 @@ export interface CalendarBooking {
 interface MultiDateCalendarProps {
   /** Selected dates as "yyyy-MM-dd" strings */
   selected: string[]
-  onToggle: (date: string) => void
+  onChange: (dates: string[]) => void
   /** Dates that are already blocked (shown but not selectable) as "yyyy-MM-dd" */
   disabledDates?: string[]
   /** Existing bookings keyed by "yyyy-MM-dd" */
@@ -42,15 +43,59 @@ interface MultiDateCalendarProps {
 
 export function MultiDateCalendar({
   selected,
-  onToggle,
+  onChange,
   disabledDates = [],
   bookingsByDate = {},
 }: MultiDateCalendarProps) {
   const [currentMonth, setCurrentMonth] = useState(() => startOfMonth(new Date()))
+  const [pickMode, setPickMode] = useState<"range" | "single">("range")
+  // First click of a range. Survives month navigation so a range can span months.
+  const [anchor, setAnchor] = useState<string | null>(null)
+  const [hoverKey, setHoverKey] = useState<string | null>(null)
   const today = startOfDay(new Date())
 
   const selectedSet = useMemo(() => new Set(selected), [selected])
   const disabledSet = useMemo(() => new Set(disabledDates), [disabledDates])
+
+  // An anchor that was cleared from outside (e.g. "Rensa") no longer counts.
+  const activeAnchor = pickMode === "range" && anchor && selectedSet.has(anchor) ? anchor : null
+
+  // Selectable days between two dates (inclusive, either order) — skips past and already blocked days.
+  const rangeKeys = (a: string, b: string) => {
+    const [start, end] = a < b ? [a, b] : [b, a]
+    return eachDayOfInterval({ start: parseISO(start), end: parseISO(end) })
+      .filter((d) => !isBefore(d, today))
+      .map((d) => format(d, "yyyy-MM-dd"))
+      .filter((k) => !disabledSet.has(k))
+  }
+
+  const previewSet = useMemo(
+    () => (activeAnchor && hoverKey ? new Set(rangeKeys(activeAnchor, hoverKey)) : new Set<string>()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeAnchor, hoverKey, disabledSet],
+  )
+
+  const handleClick = (key: string) => {
+    if (pickMode === "single") {
+      onChange(selectedSet.has(key) ? selected.filter((d) => d !== key) : [...selected, key])
+      return
+    }
+    if (activeAnchor) {
+      if (key === activeAnchor) {
+        onChange(selected.filter((d) => d !== key))
+      } else {
+        onChange(Array.from(new Set([...selected, ...rangeKeys(activeAnchor, key)])))
+      }
+      setAnchor(null)
+      return
+    }
+    if (selectedSet.has(key)) {
+      onChange(selected.filter((d) => d !== key))
+    } else {
+      onChange([...selected, key])
+      setAnchor(key)
+    }
+  }
 
   // Build week rows (Mon–Sun) covering the whole month.
   const weeks = useMemo(() => {
@@ -71,6 +116,36 @@ export function MultiDateCalendar({
   return (
     <TooltipProvider delayDuration={100}>
       <div className="w-full select-none">
+        {/* Pick mode */}
+        <div className="flex rounded-md border p-0.5 mb-2 text-sm">
+          {([
+            ["range", "Från–till"],
+            ["single", "Enskilda dagar"],
+          ] as const).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => {
+                setPickMode(mode)
+                setAnchor(null)
+              }}
+              className={cn(
+                "flex-1 rounded px-2 py-1 transition-colors",
+                pickMode === mode ? "bg-primary text-primary-foreground font-medium" : "text-muted-foreground hover:bg-accent",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground mb-3 min-h-[1rem]">
+          {pickMode === "single"
+            ? "Klicka på varje dag du vill spärra."
+            : activeAnchor
+              ? `Från ${format(parseISO(activeAnchor), "d MMMM", { locale: sv })} — klicka på sista dagen (bläddra med pilarna om den ligger i en annan månad).`
+              : "Klicka på första dagen och sedan på sista dagen. Klicka på en markerad dag för att ta bort den."}
+        </p>
+
         {/* Month header */}
         <div className="flex items-center justify-between mb-3">
           <Button
@@ -124,6 +199,8 @@ export function MultiDateCalendar({
                 const isPast = isBefore(day, today)
                 const isToday = isSameDay(day, today)
                 const isSelected = selectedSet.has(key)
+                const isAnchor = key === activeAnchor
+                const inPreview = !isSelected && previewSet.has(key)
                 const isBlocked = disabledSet.has(key)
                 const dayBookings = bookingsByDate[key]
                 const hasBookings = !!dayBookings && dayBookings.length > 0
@@ -133,7 +210,9 @@ export function MultiDateCalendar({
                   <button
                     type="button"
                     disabled={disabled}
-                    onClick={() => onToggle(key)}
+                    onClick={() => handleClick(key)}
+                    onMouseEnter={() => setHoverKey(key)}
+                    onMouseLeave={() => setHoverKey((k) => (k === key ? null : k))}
                     className={cn(
                       "relative h-9 w-full rounded-md text-sm flex items-center justify-center",
                       "transition-all duration-100 active:scale-90",
@@ -150,6 +229,10 @@ export function MultiDateCalendar({
                       // selected — strong, obvious feedback
                       isSelected &&
                         "bg-primary text-primary-foreground font-bold scale-105 shadow-md ring-2 ring-primary ring-offset-1 hover:bg-primary",
+                      // range start waiting for its end
+                      isAnchor && "ring-4 ring-primary/40 animate-pulse",
+                      // days the pending range would cover
+                      inPreview && "bg-primary/20 text-foreground hover:bg-primary/30",
                       // already blocked
                       isBlocked && "bg-muted text-muted-foreground line-through cursor-not-allowed",
                       // past
