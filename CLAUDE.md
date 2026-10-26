@@ -145,22 +145,21 @@ admin UI/API instead, which hot-reloads the schema.
 
 The block-date dialog has two modes via a toggle:
 - **Spärra dag** — single date via a native date input → one `adminCreateSpaceBlockedDate()`.
-- **Spärra period** — `components/multi-date-calendar.tsx`: a month grid (Mon–Sun headers, ISO week numbers, browse months with arrows). Click days to multi-select; selection persists across months. Existing bookings for the chosen space are highlighted amber with a hover tooltip (foodtruck @ space); already-blocked dates are struck through and unselectable. Save loops `adminCreateSpaceBlockedDate()` once per selected day. Bookings are loaded via `getBookingsForDateRange()` (today → +18 months) when a space is selected.
+- **Spärra period** — `components/multi-date-calendar.tsx`: a month grid (Mon–Sun headers, ISO week numbers, browse months with arrows). Two pick modes: **Från–till** (default — first click sets a start day, second click adds every day in between, also across months; past and already-blocked days are skipped; hover previews the range) and **Enskilda dagar** (click-per-day toggle). Clicking a selected day deselects it. Existing bookings for the chosen space are highlighted amber with a hover tooltip (foodtruck @ space); already-blocked dates are struck through and unselectable. If the selection includes booked days, an amber warning lists them — **blocking never cancels an existing booking**, so the admin must deselect those days or contact the truck. Save loops `adminCreateSpaceBlockedDate()` once per selected day. Bookings are loaded via `getBookingsForDateRange()` (today → +18 months) when a space is selected.
+
+**One rule set, three readers.** A slot is blocked if a non-archived `space_blocked_dates` row exists for that space + date with `time_slot` = `all_day` or the slot's own type (`morning` = start hour < 16, else `evening`). The same rule is applied in `createBooking()` → `isSpaceBlocked()` (authoritative, per-date query), on `/booking` and in `available-slots-dialog.tsx` (UI only). The UI reads the full list via `getSpaceBlockedDates()`, which **must keep `limit=-1`** — without it Directus returns 100 rows, and with 500+ blocks sorted by date the newest ones silently vanished from admin and the booking UI (2026-10-26: Klittervägen C/D looked "unsaved", admins re-entered them and created duplicates). The server check was never affected.
 
 ### Deployment
 - Self-hosted on the **`glsfbg` VPS** in Docker behind Caddy (migrated off
   Frej's Vercel 2026-06-18). See `DEPLOY.md` for the full runbook.
 - Production URL: `https://foodtruck.businessfalkenberg.se`
 - Container `foodtruck`, host `127.0.0.1:3009` → container `:3000`
-- **We run on our own fork now — Frej has left.** This repo has two git remotes:
-  - `fork` → `cryptonicsurfer/foodtruck` — **our fork; this is what the VPS
-    deploys from. Push here** (`git push fork main`).
-  - `origin` → `frejandreassen/foodtruck` — Frej's upstream. Diverged (still
-    carries his Vercel-deploy GitHub Action); not our deploy source. Don't push
-    here — it'll be rejected and wouldn't deploy anyway.
-- To deploy changes: `git push fork main`, then
-  `ssh -A glsfbg && cd ~/foodtruck && git pull && docker compose up -d --build`
-  (the VPS `~/foodtruck` clone tracks `cryptonicsurfer/foodtruck`).
+- **We run on our own repo now — Frej has left.** Single git remote:
+  `origin` → `cryptonicsurfer/foodtruck` (since ~2026-10; the old two-remote
+  setup with `fork` + Frej's `frejandreassen/foodtruck` upstream is gone).
+- To deploy changes: branch → PR on `cryptonicsurfer/foodtruck` → squash-merge,
+  then `ssh -A glsfbg "cd ~/foodtruck && git pull && docker compose up -d --build"`
+  (the VPS `~/foodtruck` clone tracks the same repo).
 - Frej's old Vercel deploy (`foodtruck-zeta.vercel.app`) is orphaned — no DNS
   points to it, and we no longer maintain that pipeline.
 
