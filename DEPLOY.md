@@ -41,21 +41,13 @@ APP_URL=https://foodtruck.businessfalkenberg.se
 NEXT_PUBLIC_APP_URL=https://foodtruck.businessfalkenberg.se
 DIRECTUS_URL=https://cms.businessfalkenberg.se
 NEXT_PUBLIC_DIRECTUS_URL=https://cms.businessfalkenberg.se
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=<the foodtruck-maps-js key — see note below>
-NEXT_PUBLIC_GOOGLE_MAP_ID=DEMO_MAP_ID
 EOF
 ```
 
-🔑 **Google Maps key:** use the `foodtruck-maps-js` key created in the
-`falkenbergcloud` Google Cloud project (Maps Platform → Keys & credentials).
-It is hard-restricted and safe to be public in the client bundle:
-- Application restriction: HTTP referrer `https://foodtruck.businessfalkenberg.se/*`
-- API restriction: Maps JavaScript API only
-- Quota cap: Maps JavaScript API "Map loads per day" = 1,000 (hard stop vs runaway cost)
-
-The live value is already in `~/foodtruck/.env` on the VPS. It is intentionally
-NOT committed here (this repo is public). If you ever need it, read it from the
-VPS `.env` or the Cloud Console key. The map will not render until this is set.
+🗺️ **Maps need no key.** Since 2026-10-26 (#10) the map is MapLibre GL with
+OpenFreeMap tiles (`tiles.openfreemap.org`) — no API key, no billing. The old
+`NEXT_PUBLIC_GOOGLE_MAPS_*` variables are unused; delete them if an old `.env`
+still has them.
 
 ## Step 3 — build & run the container
 
@@ -92,9 +84,9 @@ foodtruck.businessfalkenberg.se {
 ```
 
 > Note: we deliberately do **not** `import security_headers` here. That shared
-> snippet's CSP (`connect-src 'self' wss://chat…`) would block the Google Maps
-> JS API and tiles. Same reasoning as the `invest.falkenberg.se` block. The app
-> ran without a strict CSP on Vercel, so this preserves known-good behavior.
+> snippet's CSP (`connect-src 'self' wss://chat…`) would block the map tiles
+> from `tiles.openfreemap.org`. If a CSP is ever added, allow that host in
+> `connect-src` and `img-src` (the MapLibre worker is same-origin).
 
 Validate and reload:
 
