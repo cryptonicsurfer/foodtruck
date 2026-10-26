@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { getBookingsForDateRange, getUserFoodTruck, getBookingRules, createBooking, getSpaceBlockedDates } from "@/app/actions"
 import { useToast } from "@/components/ui/use-toast"
+import { findSlotBlock, slotTypeFromStart } from "@/lib/booking-rules"
 
 interface AvailableSlotsDialogProps {
   open: boolean
@@ -177,24 +178,11 @@ export function AvailableSlotsDialog({
     })
   }
 
-  // Check if a slot is blocked by admin
+  // Check if a slot is blocked by admin (shared rule, lib/booking-rules.ts).
+  // blockedList is already filtered to this space.
   const isSlotBlocked = (timeSlot: any, date: Date, blockedList: any[]): boolean => {
-    const dateStr = format(date, 'yyyy-MM-dd')
-
-    // Determine which time slot type this is (morning: 06-15, evening: 16-03)
-    const slotStartHour = parseInt(timeSlot.start.split(':')[0])
-    const slotType = slotStartHour < 16 ? "morning" : "evening"
-
-    return blockedList.some(blocked => {
-      // Check if dates match
-      if (blocked.date !== dateStr) return false
-
-      // Check time slot match
-      if (blocked.time_slot === "all_day") return true
-      if (blocked.time_slot === slotType) return true
-
-      return false
-    })
+    if (!timeSlot?.start) return false
+    return findSlotBlock(blockedList, spaceId, format(date, 'yyyy-MM-dd'), slotTypeFromStart(timeSlot.start)).blocked
   }
   
   // Check if user has reached max bookings

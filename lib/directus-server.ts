@@ -2,6 +2,7 @@
  * Directus server functions for server-side API communication
  */
 import { serverEnv } from "@/lib/env";
+import { findSlotBlock } from "@/lib/booking-rules";
 
 interface DirectusErrorResponse {
   errors?: { message?: string }[];
@@ -619,17 +620,8 @@ export const directusServer = {
       }
     );
 
-    // Check if any blocked date matches the time slot
-    for (const blocked of response.data) {
-      if (blocked.time_slot === "all_day") {
-        return { blocked: true, reason: blocked.reason };
-      }
-      if (blocked.time_slot === timeSlot) {
-        return { blocked: true, reason: blocked.reason };
-      }
-    }
-
-    return { blocked: false };
+    // Same matching rule as the UI (lib/booking-rules.ts)
+    return findSlotBlock(response.data, spaceId, date, timeSlot);
   },
 
   /**

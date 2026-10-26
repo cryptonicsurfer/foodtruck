@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { format, addDays } from "date-fns"
 import { useRouter } from "next/navigation"
+import { findSlotBlock, slotTypeFromStart, seasonStatus as seasonStatusFor } from "@/lib/booking-rules"
 import { ProtectedRoute } from "@/components/protected-route"
 import { SidebarProvider } from "@/components/ui/sidebar"
 import { AppSidebar } from "@/components/app-sidebar"
@@ -329,51 +330,18 @@ export default function BookingPage() {
     return hoursUntilBooking <= bookingRules.last_minute_booking_hours
   }
 
-  // Check if a specific space and time slot is blocked
+  // Check if a specific space and time slot is blocked (shared rule, lib/booking-rules.ts)
   const isSlotBlocked = (spaceId: string | number, timeSlot: { start: string }): { blocked: boolean; reason?: string } => {
     if (!date || !blockedDates.length) return { blocked: false }
     // Guard against malformed time slots (null/missing start).
     if (!timeSlot || !timeSlot.start) return { blocked: false }
-
-    const dateStr = format(date, 'yyyy-MM-dd')
-    const slotStartHour = parseInt(timeSlot.start.split(':')[0])
-    // Morning slot is before 16:00, Evening slot is 16:00 or later
-    const slotType = slotStartHour < 16 ? "morning" : "evening"
-
-    const block = blockedDates.find(blocked => {
-      // Check if this block is for the current space and date
-      const blockSpaceId = blocked.space?.id || blocked.space
-      if (String(blockSpaceId) !== String(spaceId)) return false
-      if (blocked.date !== dateStr) return false
-
-      // Check if the time slot matches
-      if (blocked.time_slot === "all_day") return true
-      if (blocked.time_slot === slotType) return true
-
-      return false
-    })
-
-    if (block) {
-      return { blocked: true, reason: block.reason }
-    }
-    return { blocked: false }
+    return findSlotBlock(blockedDates, spaceId, format(date, 'yyyy-MM-dd'), slotTypeFromStart(timeSlot.start))
   }
 
-  // Check whether the selected date falls outside a space's seasonal booking
-  // window (bookable_from / bookable_to). Either bound may be null = open-ended.
+  // Check whether the selected date falls outside a space's seasonal booking window.
   const seasonStatus = (space: any): { outside: boolean; label?: string } => {
     if (!date) return { outside: false }
-    const from = space?.bookable_from ? String(space.bookable_from).slice(0, 10) : null
-    const to = space?.bookable_to ? String(space.bookable_to).slice(0, 10) : null
-    if (!from && !to) return { outside: false }
-    const d = format(date, 'yyyy-MM-dd')
-    const outside = Boolean((from && d < from) || (to && d > to))
-    if (!outside) return { outside: false }
-    const sv = (x: string) => x.split('-').reverse().join('/') // yyyy-MM-dd → dd/MM/yyyy
-    const label = from && to
-      ? `Bokningsbar ${sv(from)}–${sv(to)}`
-      : from ? `Bokningsbar från ${sv(from)}` : `Bokningsbar till ${sv(to!)}`
-    return { outside: true, label }
+    return seasonStatusFor(space, format(date, 'yyyy-MM-dd'))
   }
 
   // Get count of blocked spaces for a specific date (for calendar indicator)

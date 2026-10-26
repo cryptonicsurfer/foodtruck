@@ -4,6 +4,7 @@ import { cookies } from 'next/headers'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { directusServer } from '@/lib/directus-server'
 import { serverEnv } from '@/lib/env'
+import { slotTypeFromHour } from '@/lib/booking-rules'
 
 /**
  * Login with email and password
@@ -517,8 +518,8 @@ export async function createBooking(bookingData: {
     }
 
     const bookingHour = bookingStartDate.getHours()
-    // Morning slot is 06:00-15:00, Evening slot is 16:00-03:00
-    const timeSlot: "morning" | "evening" = bookingHour < 16 ? "morning" : "evening"
+    // Morning slot is 06:00-15:00, Evening slot is 16:00-03:00 (lib/booking-rules.ts)
+    const timeSlot = slotTypeFromHour(bookingHour)
 
     console.log("=== Checking if space is blocked ===")
     console.log("Space:", bookingData.space, "Date:", bookingDate, "Time slot:", timeSlot, "Hour:", bookingHour)

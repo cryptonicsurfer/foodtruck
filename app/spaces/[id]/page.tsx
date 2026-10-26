@@ -21,8 +21,10 @@ import {
   getBookingsForDateRange,
   createBooking,
   getBookingRules,
-  getFoodTruckBookings
+  getFoodTruckBookings,
+  getSpaceBlockedDates
 } from "@/app/actions"
+import { findSlotBlock, slotTypeFromStart, seasonStatus, allDayBlockedDates } from "@/lib/booking-rules"
 import SpacesMap from "@/components/spaces-map"
 
 export default function SpaceDetailsPage() {
@@ -41,6 +43,7 @@ export default function SpaceDetailsPage() {
   const [bookingTimeSlot, setBookingTimeSlot] = useState<any>(null)
   const [isBooking, setIsBooking] = useState(false)
   const [bookingError, setBookingError] = useState<string | undefined>(undefined)
+  const [blockedDates, setBlockedDates] = useState<any[]>([])
 
   const loadSpaceDetails = async () => {
     setIsLoading(true)
@@ -58,7 +61,10 @@ export default function SpaceDetailsPage() {
       
       // Load all spaces and find the specific one
       // Note: In a real app, you'd have a getSpaceById API
-      const spacesResult = await getAllSpaces()
+      const [spacesResult, blockedResult] = await Promise.all([getAllSpaces(), getSpaceBlockedDates()])
+      if (blockedResult.success && blockedResult.data) {
+        setBlockedDates(blockedResult.data)
+      }
       
       if (spacesResult.success) {
         const spaceData = spacesResult.data?.find(s => String(s.id) === spaceId)
@@ -308,9 +314,32 @@ export default function SpaceDetailsPage() {
     return allFutureBookingsCount >= bookingRules.maximum_future_bookings
   }
 
+  // Blocks and season for the selected date — same rules as /booking and the server
+  const selectedDateStr = format(date, "yyyy-MM-dd")
+  const season = space ? seasonStatus(space, selectedDateStr) : { outside: false }
+  const getSlotBlock = (timeSlot: any) =>
+    space && timeSlot?.start
+      ? findSlotBlock(blockedDates, space.id, selectedDateStr, slotTypeFromStart(timeSlot.start))
+      : { blocked: false }
+  const fullyBlockedDays = space
+    ? allDayBlockedDates(blockedDates, space.id).map(d => new Date(d + "T12:00:00"))
+    : []
+
   // Start the booking process
   const handleBookSpace = (timeSlot: any) => {
     console.log("=== handleBookSpace called ===", timeSlot)
+
+    const block = getSlotBlock(timeSlot)
+    if (block.blocked || season.outside) {
+      toast({
+        title: "Platsen går inte att boka",
+        description: block.blocked
+          ? (block.reason ? `Spärrad: ${block.reason}` : "Platsen är spärrad detta datum")
+          : `${season.label} — ej bokningsbar valt datum`,
+        variant: "destructive"
+      })
+      return
+    }
 
     if (!userFoodTruck) {
       toast({
@@ -643,8 +672,15 @@ export default function SpaceDetailsPage() {
                               before: new Date(),
                               after: bookingRules ? addDays(new Date(), bookingRules.maximum_days_ahead) : undefined 
                             }}
+                            modifiers={{ blocked: fullyBlockedDays }}
+                            modifiersClassNames={{ blocked: "line-through text-muted-foreground bg-red-50" }}
                           />
                         </div>
+                        {fullyBlockedDays.length > 0 && (
+                          <p className="text-xs text-center mt-1 text-muted-foreground">
+                            <span className="line-through">Överstrukna</span> dagar är spärrade.
+                          </p>
+                        )}
                         <p className="text-sm text-center mt-2 text-muted-foreground">
                           {date ? (
                             <>Showing availability for <strong>{format(date, "EEEE, MMMM do, yyyy")}</strong></>
@@ -662,16 +698,27 @@ export default function SpaceDetailsPage() {
                           Time Slots
                         </h4>
                         
+                        {season.outside && (
+                          <div className="mb-2 flex items-center gap-1.5 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                            <CalendarIcon size={14} className="shrink-0" />
+                            <span>{season.label} — ej bokningsbar valt datum</span>
+                          </div>
+                        )}
+
                         {space.time_slots && space.time_slots.length > 0 ? (
                           <div className="space-y-2">
                             {space.time_slots.map((slot: any, index: number) => {
                               const isBooked = isTimeSlotBooked(slot);
                               const bookingDetails = isBooked ? getBookingDetails(slot) : null;
+                              const block = getSlotBlock(slot);
+                              const unavailable = isBooked || block.blocked || season.outside;
                               
                               return (
                                 <div 
                                   key={index} 
-                                  className={`p-3 rounded-md flex justify-between items-center ${isBooked ? 'bg-gray-50' : 'bg-green-50'}`}
+                                  className={`p-3 rounded-md flex justify-between items-center ${
+                                    block.blocked ? 'bg-red-50' : unavailable ? 'bg-gray-50' : 'bg-green-50'
+                                  }`}
                                 >
                                   <div>
                                     <div className="font-medium">{slot.description || `Time Slot ${index + 1}`}</div>
@@ -684,9 +731,15 @@ export default function SpaceDetailsPage() {
                                         Booked by {bookingDetails?.foodtruck?.name || "Another food truck"}
                                       </div>
                                     )}
+                                    {!isBooked && block.blocked && (
+                                      <div className="text-red-700 text-sm flex items-center">
+                                        <X size={12} className="mr-1" />
+                                        Spärrad{block.reason ? `: ${block.reason}` : ""}
+                                      </div>
+                                    )}
                                   </div>
                                   
-                                  {!isBooked && (
+                                  {!unavailable && (
                                     <Button
                                       size="sm"
                                       onClick={() => handleBookSpace(slot)}
