@@ -202,7 +202,7 @@ The block-date dialog has two modes via a toggle:
 
 - **Google Maps is gone (2026-10-26).** The old key (`AIza…Xo6w`, Frej's
   `falkenbergcloud` project) went invalid, which is why we switched. The
-  `NEXT_PUBLIC_GOOGLE_MAPS_*` lines in the VPS `.env` are unused now.
+  `NEXT_PUBLIC_GOOGLE_MAP*` lines were removed from the VPS `.env` the same day.
 
 - **Directus `spaces.location` map widget needs a Caddy CSP exception.** The
   Directus map field uses MapLibre GL, which spawns a `blob:` web worker and
