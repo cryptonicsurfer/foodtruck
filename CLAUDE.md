@@ -147,7 +147,7 @@ The block-date dialog has two modes via a toggle:
 - **Spärra dag** — single date via a native date input → one `adminCreateSpaceBlockedDate()`.
 - **Spärra period** — `components/multi-date-calendar.tsx`: a month grid (Mon–Sun headers, ISO week numbers, browse months with arrows). Two pick modes: **Från–till** (default — first click sets a start day, second click adds every day in between, also across months; past and already-blocked days are skipped; hover previews the range) and **Enskilda dagar** (click-per-day toggle). Clicking a selected day deselects it. Existing bookings for the chosen space are highlighted amber with a hover tooltip (foodtruck @ space); already-blocked dates are struck through and unselectable. If the selection includes booked days, an amber warning lists them — **blocking never cancels an existing booking**, so the admin must deselect those days or contact the truck. Save loops `adminCreateSpaceBlockedDate()` once per selected day. Bookings are loaded via `getBookingsForDateRange()` (today → +18 months) when a space is selected.
 
-**One rule set, three readers.** A slot is blocked if a non-archived `space_blocked_dates` row exists for that space + date with `time_slot` = `all_day` or the slot's own type (`morning` = start hour < 16, else `evening`). The same rule is applied in `createBooking()` → `isSpaceBlocked()` (authoritative, per-date query), on `/booking` and in `available-slots-dialog.tsx` (UI only). The UI reads the full list via `getSpaceBlockedDates()`, which **must keep `limit=-1`** — without it Directus returns 100 rows, and with 500+ blocks sorted by date the newest ones silently vanished from admin and the booking UI (2026-10-26: Klittervägen C/D looked "unsaved", admins re-entered them and created duplicates). The server check was never affected.
+**One rule set, in one file: `lib/booking-rules.ts`.** A slot is blocked if a non-archived `space_blocked_dates` row exists for that space + date with `time_slot` = `all_day` or the slot's own type (`morning` = start hour < 16, else `evening`); the seasonal window (`seasonStatus`) lives there too. Every reader imports it: `createBooking()` → `isSpaceBlocked()` (authoritative, per-date query), `/booking`, the space details page `/spaces/[id]` and `available-slots-dialog.tsx` (currently unused). **Any new view that offers a "Book" button must use these helpers** — `/spaces/[id]` used to ignore blocks and season entirely and showed blocked days as "Tillgänglig" (server still refused the booking; fixed 2026-10-26). The UI reads the full list via `getSpaceBlockedDates()`, which **must keep `limit=-1`** — without it Directus returns 100 rows, and with 500+ blocks sorted by date the newest ones silently vanished from admin and the booking UI (2026-10-26: Klittervägen C/D looked "unsaved", admins re-entered them and created duplicates). The server check was never affected.
 
 ### Deployment
 - Self-hosted on the **`glsfbg` VPS** in Docker behind Caddy (migrated off
@@ -181,6 +181,14 @@ The block-date dialog has two modes via a toggle:
   missing (a dead `<div id="toast-container" />` placeholder sat there instead),
   which made **every** `toast()` in the app silently no-op — booking success,
   errors, validation, all invisible. If toasts stop showing, check the layout first.
+
+- **Google Maps key is dead (2026-10-26).** The baked-in `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`
+  (`AIza…Xo6w`, Frej's `falkenbergcloud` project) returns "The provided API key is invalid"
+  — key or project deleted — so every map shows "Oops! Something went wrong". Booking
+  still works (lists, not the map). Fix = new referrer-locked Maps JS key in a project we
+  own (see bf-ops `falkenberg-cloud-to-tomas-fbg-kommun-migration.md`), put it in
+  `~/foodtruck/.env` on the VPS and rebuild (it's a build-arg). Quick check:
+  `curl -s "https://maps.googleapis.com/maps/api/geocode/json?address=x&key=<KEY>"`.
 
 - **Directus `spaces.location` map widget needs a Caddy CSP exception.** The
   Directus map field uses MapLibre GL, which spawns a `blob:` web worker and
