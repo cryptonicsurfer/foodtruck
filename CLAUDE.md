@@ -40,7 +40,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   have **no** foodtruck, so `handleBookSpace` returns early — the page shows an
   amber "ingen foodtruck kopplad" banner (gated by a `userLoaded` flag) instead
   of letting them book. To test the booking flow, log in as a foodtruck account.
-- Admin roles (`/admin` access): `ADMIN_ROLES = ['Administrator', 'Head of Foodtruck']` in `app/actions.ts`.
+- Admin access (`/admin` + admin server actions) = `hasAdminAccess()` in `app/actions.ts`:
+  role `Administrator` / `Head of Foodtruck` (`ADMIN_ROLES`) **or** the policy
+  "Head of food truck spaces" attached directly to the user. A Directus user has
+  one role, so colleagues whose role belongs to another app (Helena = CRM användare,
+  Johan = Destination Falkenberg) get the policy on their account instead — before
+  2026-10-28 the app checked role name only and shut them out of `/admin` although
+  Directus let them do everything. The policy lookup fails closed.
+- **Who can create whom:** Head of Foodtruck (role or policy) creates Foodtruckers
+  in the app (`/admin`) and in Directus, and new Head of Foodtruck users **only in
+  Directus admin** (cms.businessfalkenberg.se → Users). The policy's create/update
+  validation only allows the roles Foodtrucker and Head of Foodtruck — picking
+  Administrator or CRM användare gives a bare 400 (Helena hit this 2026-10-28).
 - **Email**: the app sends no mail itself — password-reset goes through Directus
   (`/auth/password/request`). Directus is configured for **Gmail SMTP**
   (`smtp.gmail.com:465`, SSL) from **`businessfalkenberg@gmail.com`** with a
