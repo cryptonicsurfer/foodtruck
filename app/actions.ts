@@ -676,6 +676,23 @@ export async function cancelBooking(bookingId: string) {
 // ============================================
 
 const ADMIN_ROLES = ['Administrator', 'Head of Foodtruck']
+// "Head of food truck spaces" — the policy behind Head of Foodtruck. Users whose
+// role belongs to another app (CRM, Destination) get it attached directly instead.
+const FOODTRUCK_ADMIN_POLICY_ID = '4160d6aa-eefe-4d9e-ac2b-c32ac66b83d1'
+
+/**
+ * Admin = an admin role, or the foodtruck admin policy attached to the user.
+ * Fails closed: if the policy lookup errors, the user is not admin.
+ */
+async function hasAdminAccess(token: string, roleName?: string) {
+  if (ADMIN_ROLES.includes(roleName || '')) return true
+  try {
+    const policyIds = await directusServer.getCurrentUserPolicyIds(token)
+    return policyIds.includes(FOODTRUCK_ADMIN_POLICY_ID)
+  } catch {
+    return false
+  }
+}
 
 /**
  * Get current user with role - checks if user has admin access
@@ -690,7 +707,7 @@ export async function getCurrentUserWithRole() {
     }
 
     const response = await directusServer.getCurrentUserWithRole(token)
-    const isAdmin = ADMIN_ROLES.includes(response.data.role?.name)
+    const isAdmin = await hasAdminAccess(token, response.data.role?.name)
 
     return {
       success: true,
@@ -814,9 +831,9 @@ export async function adminUpdateFoodTruck(id: string, data: { name?: string; de
       return { success: false, error: 'Not authenticated' }
     }
 
-    // Verify admin role
+    // Verify admin access
     const userResult = await directusServer.getCurrentUserWithRole(token)
-    if (!ADMIN_ROLES.includes(userResult.data.role?.name || '')) {
+    if (!(await hasAdminAccess(token, userResult.data.role?.name))) {
       return { success: false, error: 'Unauthorized' }
     }
 
@@ -859,9 +876,9 @@ export async function adminUpdateSpace(id: string, data: SpaceData) {
       return { success: false, error: 'Not authenticated' }
     }
 
-    // Verify admin role
+    // Verify admin access
     const userResult = await directusServer.getCurrentUserWithRole(token)
-    if (!ADMIN_ROLES.includes(userResult.data.role?.name || '')) {
+    if (!(await hasAdminAccess(token, userResult.data.role?.name))) {
       return { success: false, error: 'Unauthorized' }
     }
 
@@ -894,7 +911,7 @@ export async function adminCreateSpace(data: SpaceData) {
     }
 
     const userResult = await directusServer.getCurrentUserWithRole(token)
-    if (!ADMIN_ROLES.includes(userResult.data.role?.name || '')) {
+    if (!(await hasAdminAccess(token, userResult.data.role?.name))) {
       return { success: false, error: 'Unauthorized' }
     }
 
@@ -927,7 +944,7 @@ export async function adminDeleteSpace(id: string) {
     }
 
     const userResult = await directusServer.getCurrentUserWithRole(token)
-    if (!ADMIN_ROLES.includes(userResult.data.role?.name || '')) {
+    if (!(await hasAdminAccess(token, userResult.data.role?.name))) {
       return { success: false, error: 'Unauthorized' }
     }
 
@@ -1047,9 +1064,9 @@ export async function adminUpdateBookingRules(data: {
       return { success: false, error: 'Not authenticated' }
     }
 
-    // Verify admin role
+    // Verify admin access
     const userResult = await directusServer.getCurrentUserWithRole(token)
-    if (!ADMIN_ROLES.includes(userResult.data.role?.name || '')) {
+    if (!(await hasAdminAccess(token, userResult.data.role?.name))) {
       return { success: false, error: 'Unauthorized' }
     }
 

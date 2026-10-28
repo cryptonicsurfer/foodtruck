@@ -543,6 +543,22 @@ export const directusServer = {
   },
 
   /**
+   * IDs of the policies attached directly to the current user (not via role)
+   */
+  async getCurrentUserPolicyIds(token: string) {
+    const response = await directusRequest<{ data: { policies?: Array<{ policy: string }> } }>(
+      "/users/me?fields=policies.policy",
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+    return (response.data.policies ?? []).map((access) => access.policy);
+  },
+
+  /**
    * Get all food trucks with user information (for admin)
    */
   async getAllFoodTrucksWithUsers(token: string) {
