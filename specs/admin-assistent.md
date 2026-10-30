@@ -304,9 +304,11 @@ status och user, och utan update kan confirm-steget inte flytta raden från `pen
 `POST /api/admin-assistant/confirm {id}` gör följande:
 
 1. Kontrollerar att förslaget tillhör samma användare och är yngre än 10 minuter, och
-   **tar** det atomärt: en uppdatering `pending` → `confirmed` med filtret
-   `status = pending`. Ändrades ingen rad har någon annan (eller ett dubbelklick)
-   redan tagit det, och inget körs.
+   **tar** det: en uppdatering `pending` → `confirming` med filtret `status = pending`,
+   under ett lås per rad i processen (`withRowLock`). Directus uppdatering med filter
+   är inte atomär (läser först, skriver sedan; på staging lyckades upp till 7 av 20
+   samtidiga försök), så det är låset som hindrar dubbelkörning. Det räcker eftersom
+   appen är en container och en process; skalas den ut behövs ett lås i databasen.
 2. Kör `analyzeImpact()` igen. Har läget ändrats (någon har bokat under tiden) visas
    ett nytt kort, och inget körs.
 3. Kör ändringen via de befintliga admin-actions (`adminCreateSpaceBlockedDate` osv.)

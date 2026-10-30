@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { SpaceMiniMap } from "@/components/space-mini-map"
+import { ChatText } from "@/components/chat-text"
 import { SpaceLocationPicker } from "@/components/space-location-picker"
 import { cn } from "@/lib/utils"
 import type { Card, Proposal } from "@/lib/assistant/impact"
@@ -63,6 +64,7 @@ export function AdminAssistant({ onChanged }: { onChanged?: () => void }) {
   // Outcomes of cards, told to the model with the next message
   const notes = useRef<string[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     fetch("/api/admin-assistant/status")
@@ -74,6 +76,12 @@ export function AdminAssistant({ onChanged }: { onChanged?: () => void }) {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
   }, [items, busy])
+
+  // Back to the input when the assistant has answered (the textarea is disabled while busy).
+  // Only with a mouse: on a phone it would pop the keyboard up over the answer.
+  useEffect(() => {
+    if (open && !busy && window.matchMedia("(pointer: fine)").matches) inputRef.current?.focus()
+  }, [open, busy])
 
   if (!enabled) return null
 
@@ -174,11 +182,11 @@ export function AdminAssistant({ onChanged }: { onChanged?: () => void }) {
                 <div
                   key={i}
                   className={cn(
-                    "rounded-lg px-3 py-2 text-sm whitespace-pre-wrap max-w-[90%]",
-                    it.role === "user" ? "ml-auto bg-primary text-primary-foreground" : "bg-muted"
+                    "rounded-lg px-3 py-2 text-sm max-w-[90%] break-words",
+                    it.role === "user" ? "ml-auto bg-primary text-primary-foreground whitespace-pre-wrap" : "bg-muted"
                   )}
                 >
-                  {it.text}
+                  {it.role === "assistant" ? <ChatText text={it.text} /> : it.text}
                 </div>
               ) : it.event.type === "space_choice" ? (
                 <SpaceChoiceCard key={it.key} event={it.event} disabled={busy} onAnswer={(t, d) => send(t, d)} />
@@ -213,6 +221,7 @@ export function AdminAssistant({ onChanged }: { onChanged?: () => void }) {
             }}
           >
             <Textarea
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
