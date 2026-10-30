@@ -113,8 +113,9 @@ export function AdminAssistant({ onChanged }: { onChanged?: () => void }) {
       // Texts on the way, then the explanation, then the cards
       const texts = newMsgs.flatMap((m) => (m.role === "assistant" && m.content?.trim() ? [m.content.trim()] : []))
       let closing = data.events.length ? texts.pop() : undefined
-      // Don't repeat the space card's own question under it
-      if (closing && data.events.some((e: UiEvent) => e.type === "space_choice" && e.question.trim() === closing)) closing = undefined
+      // The server closes a card turn with a copy of the model's text (or the card's
+      // question) — don't show the same words twice
+      if (closing && (texts.includes(closing) || data.events.some((e: UiEvent) => e.type === "space_choice" && e.question.trim() === closing))) closing = undefined
       const added: Item[] = [
         ...texts.map((text): Item => ({ kind: "text", role: "assistant", text })),
         ...(closing ? [{ kind: "text", role: "assistant", text: closing } as Item] : []),
