@@ -32,7 +32,8 @@ export async function login(email: string, password: string, otp?: string) {
       maxAge: 60 * 60, // 1 hour
     })
     
-    return { success: true, data: response.data }
+    // Tokens stay in the httpOnly cookies; never hand them to the browser
+    return { success: true }
   } catch (error) {
     console.error('Login error:', error)
 
@@ -613,7 +614,8 @@ export async function refreshToken() {
       maxAge: 60 * 60, // 1 hour
     })
     
-    return { success: true, data: response.data }
+    // Tokens stay in the httpOnly cookies; never hand them to the browser
+    return { success: true }
   } catch (error) {
     console.error('Token refresh error:', error)
     return { 

@@ -52,7 +52,7 @@ export function LoginForm({
         setNeedsOtp(true)
         setOtp("")
       }
-      setError(err instanceof Error ? err.message : "An error occurred")
+      setError(err instanceof Error ? err.message : "Något gick fel")
     } finally {
       setIsLoading(false)
     }
@@ -71,9 +71,9 @@ export function LoginForm({
     return (
       <div className="flex flex-col gap-6">
         <div className="flex flex-col items-center gap-2 text-center">
-          <h1 className="text-2xl font-bold">Welcome!</h1>
+          <h1 className="text-2xl font-bold">Välkommen!</h1>
           <p className="text-muted-foreground text-sm text-balance">
-            You are logged in as {user.email}
+            Du är inloggad som {user.email}
           </p>
         </div>
         
@@ -81,16 +81,16 @@ export function LoginForm({
           <CardContent className="pt-6">
             <div className="space-y-4">
               <div>
-                <span className="font-medium">Email:</span> {user.email}
+                <span className="font-medium">E-post:</span> {user.email}
               </div>
               {user.first_name && (
                 <div>
-                  <span className="font-medium">First Name:</span> {user.first_name}
+                  <span className="font-medium">Förnamn:</span> {user.first_name}
                 </div>
               )}
               {user.last_name && (
                 <div>
-                  <span className="font-medium">Last Name:</span> {user.last_name}
+                  <span className="font-medium">Efternamn:</span> {user.last_name}
                 </div>
               )}
             </div>
@@ -98,7 +98,7 @@ export function LoginForm({
         </Card>
         
         <Button variant="outline" onClick={handleLogout} className="w-full">
-          Logout
+          Logga ut
         </Button>
       </div>
     )
@@ -111,9 +111,9 @@ export function LoginForm({
       {...props}
     >
       <div className="flex flex-col items-center gap-2 text-center">
-        <h1 className="text-2xl font-bold">Login to your account</h1>
+        <h1 className="text-2xl font-bold">Logga in</h1>
         <p className="text-muted-foreground text-sm text-balance">
-          Enter your email below to login to your account
+          Logga in med din e-post och ditt lösenord
         </p>
       </div>
       {error && (
@@ -123,25 +123,30 @@ export function LoginForm({
       )}
       <div className="grid gap-6">
         <div className="grid gap-3">
-          <Label htmlFor="email">Email</Label>
+          <Label htmlFor="email">E-post</Label>
           <Input 
             id="email" 
             type="email" 
-            placeholder="m@example.com" 
+            placeholder="namn@exempel.se" 
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value)
+              // A different account may not have 2FA
+              setNeedsOtp(false)
+              setOtp("")
+            }}
             required 
           />
         </div>
         <div className="grid gap-3">
           <div className="flex items-center">
-            <Label htmlFor="password">Password</Label>
+            <Label htmlFor="password">Lösenord</Label>
             <button
               type="button"
               onClick={handleForgotPassword}
               className="ml-auto text-sm underline-offset-4 hover:underline"
             >
-              Forgot your password?
+              Glömt lösenordet?
             </button>
           </div>
           <Input 
@@ -159,7 +164,9 @@ export function LoginForm({
               id="otp"
               inputMode="numeric"
               autoComplete="one-time-code"
-              pattern="[0-9]*"
+              pattern="[0-9]{6}"
+              minLength={6}
+              title="Sex siffror"
               maxLength={6}
               placeholder="123456"
               value={otp}
@@ -170,7 +177,7 @@ export function LoginForm({
           </div>
         )}
         <Button type="submit" className="w-full" disabled={isLoading}>
-          {isLoading ? "Logging in..." : "Login"}
+          {isLoading ? "Loggar in…" : "Logga in"}
         </Button>
       </div>
     </form>

@@ -97,12 +97,9 @@ async function directusRequest<T>(
  */
 export const directusServer = {
   /**
-   * Authenticate user with email and password
-   */
-  /**
    * Log in. Own fetch instead of directusRequest so Directus' error code survives:
    * directusRequest turns every 401 from /auth/login into "Invalid email or password",
-   * which hid INVALID_OTP for accounts with 2FA (paul.admin, 2026-10-30).
+   * which hid INVALID_OTP for accounts with 2FA (2026-10-30).
    * Directus checks the password first, so INVALID_OTP means the password was right.
    */
   async login(email: string, password: string, otp?: string) {
