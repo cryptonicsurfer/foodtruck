@@ -12,6 +12,13 @@ const DIRECTUS_URL = serverEnv.DIRECTUS_URL;
 // Mappen "foodtruck" i cms.businessfalkenberg.se — den enda som är publikt läsbar.
 export const FOODTRUCK_FOLDER_ID = "d4d54e82-a2b2-4a96-babc-d44c4e9e55ec";
 
+/** A failed /auth/login, carrying Directus' error code (INVALID_CREDENTIALS, INVALID_OTP, …). */
+export class DirectusLoginError extends Error {
+  constructor(public code: string) {
+    super(`Directus login failed: ${code}`);
+  }
+}
+
 /**
  * Create a Directus request with proper error handling
  */
@@ -90,17 +97,23 @@ async function directusRequest<T>(
  */
 export const directusServer = {
   /**
-   * Authenticate user with email and password
+   * Log in. Own fetch instead of directusRequest so Directus' error code survives:
+   * directusRequest turns every 401 from /auth/login into "Invalid email or password",
+   * which hid INVALID_OTP for accounts with 2FA (2026-10-30).
+   * Directus checks the password first, so INVALID_OTP means the password was right.
    */
-  async login(email: string, password: string) {
-    return directusRequest<{ data: { access_token: string; refresh_token: string } }>(
-      "/auth/login",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      }
-    );
+  async login(email: string, password: string, otp?: string) {
+    const response = await fetch(`${DIRECTUS_URL}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(otp ? { email, password, otp } : { email, password }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const code: string | undefined = body?.errors?.[0]?.extensions?.code;
+      throw new DirectusLoginError(code ?? `HTTP_${response.status}`);
+    }
+    return body as { data: { access_token: string; refresh_token: string } };
   },
   
   /**

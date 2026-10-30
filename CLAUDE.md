@@ -35,6 +35,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `components/protected-route.tsx` - Route protection wrapper with redirect-after-login support
 - Auth pages: `/login`, `/auth/password-request`, `/auth/password-reset`
 - No signup page (users created in Directus admin)
+- **Login errors** come from Directus' error code (`directusServer.login` does its
+  own fetch; `directusRequest` would flatten every 401). `INVALID_OTP` → the form
+  asks for the authenticator code (2FA accounts; Directus checks the password
+  first). **"Fel e-post eller lösenord" with a password you know is right:** check
+  the account's status in Directus admin — a suspended account (e.g. after too
+  many failed attempts, if `AUTH_LOGIN_ATTEMPTS` is set; wrong codes count) also
+  gets `INVALID_CREDENTIALS`, and the app can't tell the two apart.
 - **Booking is owner-only**: `/booking` only works for a user whose account has a
   linked `foodtruck` (the Foodtrucker role). Admin / "Head of Foodtruck" accounts
   have **no** foodtruck, so `handleBookSpace` returns early — the page shows an
