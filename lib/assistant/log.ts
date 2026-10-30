@@ -59,8 +59,11 @@ export async function getLogRow(id: string): Promise<LogRow | null> {
 }
 
 /**
- * Atomically move a row from `pending` to `to`. Returns false if someone (or a double
- * click) already took it — then nothing may be executed.
+ * Move a row from `pending` to `to`. Returns false if it was already taken.
+ * NOT atomic on its own: Directus' update-by-query reads the matching keys and then
+ * updates them, so concurrent calls can both "win" (tested on staging 2026-10-30: up to
+ * 7 of 20 parallel claims succeeded). Callers that execute something must hold
+ * withRowLock() around claim + execute.
  */
 export async function claimRow(id: string, to: LogStatus): Promise<boolean> {
   const updated = await req<{ id: string }[]>(`/items/${COLLECTION}?fields=id`, {
@@ -75,4 +78,19 @@ export async function finishRow(id: string, status: LogStatus, result: unknown):
     method: "PATCH",
     body: JSON.stringify({ status, result, executed_at: new Date().toISOString() }),
   })
+}
+
+// One Node process serves the app (one container), so an in-process lock per row is
+// enough to stop a double click or two tabs from running a proposal twice. If the app
+// is ever scaled to several instances, this needs a database-level lock instead.
+const locks = new Set<string>()
+
+export async function withRowLock<T>(id: string, fn: () => Promise<T>): Promise<T | "busy"> {
+  if (locks.has(id)) return "busy"
+  locks.add(id)
+  try {
+    return await fn()
+  } finally {
+    locks.delete(id)
+  }
 }

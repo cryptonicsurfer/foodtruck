@@ -49,20 +49,30 @@ q() { local body; body=$(api GET "$1") || exit 1; echo "$body" | jq -r "$2"; }
 ME=$(q "/users/me?fields=email,role.name" '.data.email + " (" + .data.role.name + ")"') || exit 1
 echo "== $ENV ($URL) som $ME"
 
-# Every lookup either answers or stops the script (a failed call must never read as "finns")
-count() { local n; n=$(q "$1" "$2") || exit 1; [[ "$n" =~ ^[0-9]+$ ]] || { echo "FEL: oväntat svar från $1" >&2; exit 1; }; echo "$n"; }
-coll_exists()   { [ "$(count "/collections" "[.data[] | select(.collection==\"$COLL\")] | length")" != 0 ]; }
-field_exists()  { [ "$(count "/fields/spaces" "[.data[] | select(.field==\"$1\")] | length")" != 0 ]; }
-policy_id()     { q "/policies?filter[name][_eq]=$(jq -rn --arg v "$POLICY_NAME" '$v|@uri')&fields=id" '.data[0].id // empty'; }
-role_id()       { q "/roles?filter[name][_eq]=$(jq -rn --arg v "$ROLE_NAME" '$v|@uri')&fields=id" '.data[0].id // empty'; }
-agent_id()      { q "/users?filter[email][_eq]=$AGENT_EMAIL&fields=id" '.data[0].id // empty'; }
+# Every lookup either answers or stops the WHOLE script. Lookups run in the main shell
+# (results land in variables), never inside $(...), where `exit` would only leave a subshell
+# and a failed call would read as "saknas" or "finns".
+die() { echo "FEL: $*" >&2; exit 1; }
+lookup() {  # lookup VAR PATH JQ — sets VAR, dies if Directus doesn't answer
+  local out
+  out=$(api GET "$2") || die "uppslaget $2 misslyckades"
+  printf -v "$1" '%s' "$(echo "$out" | jq -r "$3")"
+}
+coll_exists()  { local n; lookup n "/collections" "[.data[] | select(.collection==\"$COLL\")] | length"; [[ "$n" =~ ^[0-9]+$ ]] || die "oväntat svar"; [ "$n" != 0 ]; }
+field_exists() { local n; lookup n "/fields/spaces" "[.data[] | select(.field==\"$1\")] | length"; [[ "$n" =~ ^[0-9]+$ ]] || die "oväntat svar"; [ "$n" != 0 ]; }
+uri() { jq -rn --arg v "$1" '$v|@uri'; }
+policy_id() { lookup PID "/policies?filter[name][_eq]=$(uri "$POLICY_NAME")&fields=id" '.data[0].id // empty'; }
+role_id()   { lookup RID "/roles?filter[name][_eq]=$(uri "$ROLE_NAME")&fields=id" '.data[0].id // empty'; }
+agent_id()  { lookup AID "/users?filter[email][_eq]=$AGENT_EMAIL&fields=id" '.data[0].id // empty'; }
 
 status() {
   coll_exists && echo "  loggen: finns" || echo "  loggen: saknas"
   for f in address aliases; do field_exists $f && echo "  spaces.$f: finns" || echo "  spaces.$f: saknas"; done
-  echo "  policy: $(policy_id || true)"; echo "  roll: $(role_id || true)"; echo "  agent: $(agent_id || true)"
+  policy_id; role_id; agent_id
+  echo "  policy: ${PID:-saknas}"; echo "  roll: ${RID:-saknas}"; echo "  agent: ${AID:-saknas}"
   # Får Head of Foodtruck-policyn uppdatera de nya fälten? (fields "*" räcker)
-  echo "  Head of food truck spaces → spaces.update fält: $(q '/permissions?filter[policy][_eq]=4160d6aa-eefe-4d9e-ac2b-c32ac66b83d1&filter[collection][_eq]=spaces&filter[action][_eq]=update&fields=fields' '.data[0].fields | tostring')"
+  local f; lookup f '/permissions?filter[policy][_eq]=4160d6aa-eefe-4d9e-ac2b-c32ac66b83d1&filter[collection][_eq]=spaces&filter[action][_eq]=update&fields=fields' '.data[0].fields | tostring'
+  echo "  Head of food truck spaces → spaces.update fält: $f"
 }
 
 apply() {
@@ -88,7 +98,7 @@ apply() {
   field_exists address || { api POST /fields/spaces '{"field":"address","type":"string","meta":{"interface":"input","note":"Adress (omvänd geokodning, admin-assistenten)","width":"full"},"schema":{"is_nullable":true}}' >/dev/null; echo "  + spaces.address"; }
   field_exists aliases || { api POST /fields/spaces '{"field":"aliases","type":"json","meta":{"interface":"tags","special":["cast-json"],"note":"Smeknamn kollegorna använder (\"vid stortorget\"). Admin-assistenten söker på dem.","width":"full"},"schema":{"is_nullable":true}}' >/dev/null; echo "  + spaces.aliases"; }
 
-  PID=$(policy_id)
+  policy_id
   if [ -z "$PID" ]; then
     PID=$(api POST /policies "$(jq -nc --arg n "$POLICY_NAME" '{ name: $n, icon: "smart_toy", description: "Bara admin-assistentens logg. Ingen app-åtkomst, inga andra collections.", app_access: false, admin_access: false, enforce_tfa: false }')" | jq -r .data.id)
     for action in create read update; do
@@ -96,13 +106,14 @@ apply() {
     done
     echo "  + policy $POLICY_NAME (create/read/update på $COLL)"
   fi
-  RID=$(role_id)
+  role_id
   if [ -z "$RID" ]; then
     RID=$(api POST /roles "$(jq -nc --arg n "$ROLE_NAME" '{ name: $n, icon: "smart_toy", description: "Servicekonto för foodtrucks admin-assistent" }')" | jq -r .data.id)
     api POST /access "$(jq -nc --arg r "$RID" --arg p "$PID" '{ role: $r, policy: $p }')" >/dev/null
     echo "  + roll $ROLE_NAME"
   fi
-  if [ -z "$(agent_id)" ]; then
+  agent_id
+  if [ -z "$AID" ]; then
     local tok; tok=$(openssl rand -hex 32)
     api POST /users "$(jq -nc --arg e "$AGENT_EMAIL" --arg r "$RID" --arg t "$tok" '{ email: $e, first_name: "Foodtruck", last_name: "Agent", role: $r, status: "active", token: $t, description: "Servicekonto, inget lösenord. Skriver bara admin-assistentens logg." }')" >/dev/null
     install -m 600 /dev/null "$AGENT_TOKEN_FILE"; printf '%s' "$tok" > "$AGENT_TOKEN_FILE"
@@ -118,10 +129,9 @@ apply() {
 }
 
 revert() {
-  local id
-  id=$(agent_id); [ -n "$id" ] && { api DELETE "/users/$id" >/dev/null; rm -f "$AGENT_TOKEN_FILE"; echo "  - agent"; }
-  id=$(role_id); [ -n "$id" ] && { api DELETE "/roles/$id" >/dev/null; echo "  - roll"; }
-  id=$(policy_id); [ -n "$id" ] && { api DELETE "/policies/$id" >/dev/null; echo "  - policy (och dess rättigheter)"; }
+  agent_id; [ -n "$AID" ] && { api DELETE "/users/$AID" >/dev/null || die "kunde inte ta bort agenten"; rm -f "$AGENT_TOKEN_FILE"; echo "  - agent"; }
+  role_id; [ -n "$RID" ] && { api DELETE "/roles/$RID" >/dev/null || die "kunde inte ta bort rollen"; echo "  - roll"; }
+  policy_id; [ -n "$PID" ] && { api DELETE "/policies/$PID" >/dev/null || die "kunde inte ta bort policyn"; echo "  - policy (och dess rättigheter)"; }
   for f in aliases address; do field_exists $f && { api DELETE "/fields/spaces/$f" >/dev/null; echo "  - spaces.$f"; }; done
   coll_exists && { api DELETE "/collections/$COLL" >/dev/null; echo "  - loggen (med alla rader)"; }
   true

@@ -1774,7 +1774,7 @@ export default function AdminPage() {
           onConfirm={handleSaveRules}
         />
         {/* Shows itself only for admins when the assistant is switched on */}
-        <AdminAssistant />
+        <AdminAssistant onChanged={() => { loadData(); if (scheduleLoaded) loadSchedule(true) }} />
       </SidebarProvider>
     </ProtectedRoute>
   )

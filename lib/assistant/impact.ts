@@ -148,11 +148,12 @@ export function analyzeImpact(p: Proposal, data: Snapshot): Card {
       const hits = spaces.flatMap((s) => bookingsUnderBlock(data.bookings, s.id, p.dates, p.time_slot))
       if (hits.length) warnings.push(warn("block-on-booking", list(hits.map((b) => `${bookingLabel(b)}, ${b.space?.name ?? ""}`))))
       // Days already blocked for the same slot (or all day) are skipped at Bekräfta
-      const already = spaces.flatMap((s) =>
+      // Unique space+date pairs — production has duplicate block rows (2026-10-26)
+      const already = [...new Set(spaces.flatMap((s) =>
         data.blocks
           .filter((b) => spaceId(b.space) === Number(s.id) && p.dates.includes(b.date) && (b.time_slot === "all_day" || b.time_slot === p.time_slot))
           .map((b) => `${s.name} ${svDate(b.date)}`)
-      )
+      ))]
       const total = spaces.length * p.dates.length - already.length
       lines.push(`Platser: ${spaces.map((s) => s.name).join(", ")}`)
       lines.push(`Datum: ${svDates(p.dates)} (${p.dates.length} ${p.dates.length === 1 ? "dag" : "dagar"})`)
@@ -212,6 +213,9 @@ export function analyzeImpact(p: Proposal, data: Snapshot): Card {
       if (p.aliases?.length) lines.push(`Smeknamn: ${p.aliases.join(", ")}`)
       if (!matchesTemplate(p.time_slots)) warnings.push(warn("slots-off-template"))
       if (p.bookable_to && p.bookable_to < data.today) warnings.push(warn("season-past"))
+      if (data.spaces.some((s) => String(s.name).trim().toLowerCase() === p.name.trim().toLowerCase())) {
+        warnings.push({ severity: "stopp", text: `Det finns redan en plats som heter ${p.name}. Välj ett annat namn.` })
+      }
       card = { title: "Ny plats", point: { lng: p.lng, lat: p.lat } }
       break
     }
@@ -244,7 +248,9 @@ export function analyzeImpact(p: Proposal, data: Snapshot): Card {
     }
     case "set_foodtruck_active": {
       const t = truckById.get(p.foodtruck_id)
-      lines.push(`${t?.name ?? "Foodtrucken"} ${p.active ? "aktiveras och kan boka igen" : "inaktiveras: den kan inte boka, men konto och historik finns kvar och den kan aktiveras igen"}.`)
+      // NB: "active" only marks the truck in the admin list today — createBooking() doesn't read it
+      lines.push(`${t?.name ?? "Foodtrucken"} ${p.active ? "markeras som aktiv" : "markeras som inaktiv i listan. Konto och historik finns kvar och den kan aktiveras igen"}.`)
+      if (!p.active) lines.push("Obs: inaktiv stoppar inte bokning i dag. Ägaren kan fortfarande logga in och boka.")
       const future = data.bookings.filter((b) => spaceId(b.foodtruck) === p.foodtruck_id)
       if (!p.active && future.length) lines.push(`Kommande bokningar ligger kvar: ${list(future.map((b) => `${b.space?.name ?? ""} ${svDate(b.start)}`))}`)
       card = { title: p.active ? "Aktivera foodtruck" : "Inaktivera foodtruck" }

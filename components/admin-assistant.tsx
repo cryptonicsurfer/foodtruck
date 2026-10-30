@@ -47,10 +47,15 @@ function visible(text: string): string {
   return text.replace(/^\[Idag:[^\]]*\]\n/, "").replace(/^\(Kortet[^\n]*\)\n?/gm, "").replace(/\s*\[plats \d+\]/g, "").trim()
 }
 
-export function AdminAssistant() {
+/** onChanged: called after a confirmed change, so /admin can reload what it shows */
+export function AdminAssistant({ onChanged }: { onChanged?: () => void }) {
   const [enabled, setEnabled] = useState(false)
   const [open, setOpen] = useState(false)
   const [history, setHistory] = useState<Msg[]>([])
+  // The latest history for callbacks created in earlier renders (card follow-ups)
+  const historyRef = useRef<Msg[]>([])
+  historyRef.current = history
+  const busyRef = useRef(false)
   const [items, setItems] = useState<Item[]>([])
   const [input, setInput] = useState("")
   const [busy, setBusy] = useState(false)
@@ -75,12 +80,13 @@ export function AdminAssistant() {
   /** display: the bubble text; null = send without a bubble (automatic follow-ups) */
   async function send(text: string, display?: string | null) {
     const t = text.trim()
-    if (!t || busy) return
+    if (!t || busyRef.current) return
+    busyRef.current = true
     setError("")
     const pendingNotes = notes.current
     const content = [...pendingNotes, t].join("\n")
     notes.current = []
-    const next: Msg[] = [...history, { role: "user", content }]
+    const next: Msg[] = [...historyRef.current, { role: "user", content }]
     if (display !== null) setItems((prev) => [...prev, { kind: "text", role: "user", text: display ?? visible(t) }])
     setInput("")
     setBusy(true)
@@ -92,7 +98,9 @@ export function AdminAssistant() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || "Något gick fel.")
-      const newMsgs: Msg[] = data.messages.slice(next.length)
+      // The server may have trimmed old messages; it says what it added
+      const newMsgs: Msg[] = data.added ?? []
+      historyRef.current = data.messages
       setHistory(data.messages)
       // Texts on the way, then the explanation, then the cards
       const texts = newMsgs.flatMap((m) => (m.role === "assistant" && m.content?.trim() ? [m.content.trim()] : []))
@@ -110,6 +118,7 @@ export function AdminAssistant() {
       setError((e as Error).message)
       notes.current = [...pendingNotes, ...notes.current]
     } finally {
+      busyRef.current = false
       setBusy(false)
     }
   }
@@ -177,10 +186,12 @@ export function AdminAssistant() {
                 <ProposalCard
                   key={it.key}
                   event={it.event}
-                  onDone={(note) => {
-                    // Tell the assistant how it went, so it can wrap up or offer the next step
+                  onDone={(note, changed) => {
+                    if (changed) onChanged?.()
+                    // Tell the assistant how it went, so it can wrap up or offer the next step.
+                    // If the user is already typing a new turn, the note rides along with it.
                     notes.current.push(note)
-                    send("(Fortsätt: säg kort vad som hände och erbjud nästa steg om det finns ett.)", null)
+                    if (!busyRef.current) send("(Fortsätt: säg kort vad som hände och erbjud nästa steg om det finns ett.)", null)
                   }}
                 />
               )
@@ -306,7 +317,7 @@ function ProposalCard({
   onDone,
 }: {
   event: Extract<UiEvent, { type: "proposal" }>
-  onDone: (note: string) => void
+  onDone: (note: string, changed: boolean) => void
 }) {
   // A changed situation at Bekräfta replaces the card with a fresh one
   const [current, setCurrent] = useState(event)
@@ -342,11 +353,12 @@ function ProposalCard({
         // Anything else (login, rate limit, bad input) leaves the card open to try again.
         const handled = res.status === 409 || res.status === 410 || res.status === 500 || data.ok === false
         setState({ status: handled ? "failed" : "open", message })
-        if (handled) onDone(`(Kortet "${card.title}" misslyckades: ${message})`)
+        // ok:false can still mean part of it ran (e.g. some blocks created)
+        if (handled) onDone(`(Kortet "${card.title}" misslyckades: ${message})`, data.ok === false)
         return
       }
       setState({ status: action === "cancel" ? "cancelled" : "done", message: data.message })
-      onDone(`(Kortet "${card.title}" ${action === "cancel" ? "avbröts av användaren, inget ändrades" : `bekräftades: ${data.message}`})`)
+      onDone(`(Kortet "${card.title}" ${action === "cancel" ? "avbröts av användaren, inget ändrades" : `bekräftades: ${data.message}`})`, action === "confirm")
     } catch {
       setState({ status: "open", message: "Kunde inte nå servern. Prova igen." })
     }

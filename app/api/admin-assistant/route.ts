@@ -39,6 +39,8 @@ export async function POST(req: Request) {
   let snapshot: Promise<Snapshot> | null = null
   const getData = () => (snapshot ??= loadSnapshot(g.token))
 
+  // The client appends exactly what this request added (the history may have been trimmed)
+  const sentCount = messages.length
   const events: UiEvent[] = []
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
@@ -76,5 +78,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Assistenten svarar inte just nu. Prova igen om en stund." }, { status: 502 })
   }
 
-  return NextResponse.json({ messages, events })
+  return NextResponse.json({ messages, added: messages.slice(sentCount), events })
 }

@@ -7,7 +7,7 @@
 import { NextResponse } from "next/server"
 import { revalidatePath, revalidateTag } from "next/cache"
 import { guard } from "@/lib/assistant/guard"
-import { getLogRow, claimRow, finishRow, logProposal, PROPOSAL_TTL_MS } from "@/lib/assistant/log"
+import { getLogRow, claimRow, finishRow, logProposal, withRowLock, PROPOSAL_TTL_MS } from "@/lib/assistant/log"
 import { analyzeImpact, type Proposal } from "@/lib/assistant/impact"
 import { loadSnapshot } from "@/lib/assistant/tools"
 import { executeProposal } from "@/lib/assistant/execute"
@@ -55,12 +55,23 @@ export async function POST(req: Request) {
   } catch {
     return json({ error: "Felaktig förfrågan" }, 400)
   }
-  const row = typeof body?.id === "string" ? await getLogRow(body.id) : null
+  if (typeof body?.id !== "string") return json({ error: "Förslaget finns inte." }, 404)
+  // Everything from reading the row to writing the result runs under the row's lock
+  // handle() catches everything after execution starts, so an error escaping it means nothing ran
+  const out = await withRowLock(body.id, () => handle(body, g.token, g.userId)).catch((e) => {
+    console.error("[assistant] confirm failed before execution:", (e as Error).message)
+    return json({ error: "Något gick fel innan ändringen kördes. Inget ändrades. Prova igen." }, 503)
+  })
+  return out === "busy" ? json({ error: "Förslaget hanteras redan." }, 409) : out
+}
+
+async function handle(body: any, token: string, userId: string): Promise<NextResponse> {
+  const row = await getLogRow(body.id)
   // Someone else's card looks exactly like a missing one
-  if (!row || row.user !== g.userId) return json({ error: "Förslaget finns inte." }, 404)
+  if (!row || row.user !== userId) return json({ error: "Förslaget finns inte." }, 404)
   if (row.status !== "pending") return json({ error: "Förslaget är redan hanterat." }, 409)
   if (Date.now() - Date.parse(row.date_created) > PROPOSAL_TTL_MS) {
-    if (await claimRow(row.id, "expired")) await finishRow(row.id, "expired", null)
+    if (await claimRow(row.id, "expired")) await finishRow(row.id, "expired", null).catch(() => {})
     return json({ error: "Förslaget är äldre än 10 minuter. Be assistenten om ett nytt." }, 410)
   }
 
@@ -73,11 +84,18 @@ export async function POST(req: Request) {
   const proposal = await applyEdits(row.proposal, body.edits)
   if (typeof proposal === "string") return json({ error: proposal }, 400)
 
-  // Re-check against the data as it is NOW
-  const data = await loadSnapshot(g.token)
-  const card = analyzeImpact(proposal, data)
+  // Re-check against the data as it is NOW. A failure here ran nothing: the card stays open.
+  let data: Awaited<ReturnType<typeof loadSnapshot>>
+  let card: ReturnType<typeof analyzeImpact>
+  try {
+    data = await loadSnapshot(token)
+    card = analyzeImpact(proposal, data)
+  } catch (e) {
+    console.error("[assistant] re-check failed:", (e as Error).message)
+    return json({ error: "Kunde inte kontrollera läget just nu. Inget ändrades. Prova igen om en stund." }, 503)
+  }
   if (card.stopped) {
-    if (await claimRow(row.id, "failed")) await finishRow(row.id, "failed", { reason: "stopp", warnings: card.warnings })
+    if (await claimRow(row.id, "failed")) await finishRow(row.id, "failed", { reason: "stopp", warnings: card.warnings }).catch(() => {})
     return json({ error: card.warnings.filter((w) => w.severity === "stopp").map((w) => w.text).join(" "), card }, 409)
   }
   if (card.requireText && body.typed !== card.requireText) {
@@ -86,22 +104,26 @@ export async function POST(req: Request) {
   if (!sameWarnings(card, row.card)) {
     // Something changed since the card was shown (a new booking, an edited pin): show the new card, run nothing
     if (!(await claimRow(row.id, "expired"))) return json({ error: "Förslaget är redan hanterat." }, 409)
-    await finishRow(row.id, "expired", { reason: "ändrat läge" })
-    const id = await logProposal({ user: g.userId, prompt: `${row.prompt} (nytt kort vid Bekräfta)`, proposal, card })
+    await finishRow(row.id, "expired", { reason: "ändrat läge" }).catch(() => {})
+    const id = await logProposal({ user: userId, prompt: `${row.prompt} (nytt kort vid Bekräfta)`, proposal, card })
     return json({ changed: true, id, card, proposal, message: "Läget har ändrats sedan kortet visades. Kontrollera det nya kortet." })
   }
 
   if (!(await claimRow(row.id, "confirming"))) return json({ error: "Förslaget är redan hanterat." }, 409)
+  let result: Awaited<ReturnType<typeof executeProposal>>
   try {
-    const result = await executeProposal(proposal, g.token, data)
-    await finishRow(row.id, result.ok ? "executed" : "failed", { ...result, ...(proposal !== row.proposal ? { proposal } : {}) })
-    revalidatePath("/admin")
-    revalidatePath("/booking")
-    for (const tag of ["bookings", "blocked-dates", "foodtrucks", "booking-rules"]) revalidateTag(tag)
-    return json({ ok: result.ok, message: result.message })
+    result = await executeProposal(proposal, token, data)
   } catch (e) {
     const message = (e as Error).message || "Något gick fel."
     await finishRow(row.id, "failed", { error: message }).catch(() => {})
     return json({ ok: false, message: `Det gick inte: ${message}` }, 500)
   }
+  // The change is done: a failing log write must not turn it into an error (the user
+  // would retry and do it twice). The row then stays "confirming", which can't run again.
+  await finishRow(row.id, result.ok ? "executed" : "failed", { ...result, ...(proposal !== row.proposal ? { proposal } : {}) })
+    .catch((e) => console.error("[assistant] log write after execution failed:", (e as Error).message))
+  revalidatePath("/admin")
+  revalidatePath("/booking")
+  for (const tag of ["bookings", "blocked-dates", "foodtrucks", "booking-rules"]) revalidateTag(tag)
+  return json({ ok: result.ok, message: result.message, changed_data: proposal.kind })
 }
