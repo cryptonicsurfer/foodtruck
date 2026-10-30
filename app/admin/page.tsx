@@ -21,12 +21,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Users, CalendarOff, Settings, Trash2, Power, PowerOff, Plus, ExternalLink, UserPlus, Pencil, FileText, Link, Upload, ClipboardList, MapPin, Sun, Moon, Soup, Calendar } from "lucide-react"
+import { Users, CalendarOff, Settings, Trash2, Power, PowerOff, Plus, ExternalLink, UserPlus, Pencil, FileText, Link, Upload, ClipboardList, MapPin, Sun, Moon, Soup, Calendar, Clock, AlertTriangle } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
 import { MultiDateCalendar, type CalendarBooking } from "@/components/multi-date-calendar"
 import { SpaceDialog } from "@/components/space-dialog"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { cn } from "@/lib/utils"
+import { slotKind, shortTimeRange, slotsCoveredByBlock, bookingsUnderBlock, blockDatesOfBooking } from "@/lib/booking-rules"
 import { format, startOfMonth, addMonths } from "date-fns"
 import { sv } from "date-fns/locale"
 import {
@@ -138,7 +139,7 @@ export default function AdminPage() {
   const [scheduleSpace, setScheduleSpace] = useState("")
   // Booking selected in the schedule → opens the foodtruck preview dialog
   const [scheduleDetail, setScheduleDetail] = useState<
-    { date: string; space: string; slot: "morning" | "evening"; foodtruckId: string; foodtruckName: string } | null
+    { date: string; space: string; kind: "morning" | "evening" | "full"; time: string; foodtruckId: string; foodtruckName: string } | null
   >(null)
   // Space management (create/edit dialog + delete confirm)
   const [spaceDialog, setSpaceDialog] = useState<{ open: boolean; space: Space | null }>({ open: false, space: null })
@@ -161,11 +162,13 @@ export default function AdminPage() {
   const [editTruck, setEditTruck] = useState({ name: "", description: "" })
   const [savingEdit, setSavingEdit] = useState(false)
   const [blockDateDialog, setBlockDateDialog] = useState(false)
-  const [newBlockedDate, setNewBlockedDate] = useState({ space: "", date: "", time_slot: "all_day" as const, reason: "" })
+  const [newBlockedDate, setNewBlockedDate] = useState({ space: "", date: "", time_slot: "all_day" as BlockedDate["time_slot"], reason: "" })
   const [blockMode, setBlockMode] = useState<"day" | "period">("day")
   const [periodDates, setPeriodDates] = useState<string[]>([])
   const [savingBlock, setSavingBlock] = useState(false)
   const [periodBookings, setPeriodBookings] = useState<any[]>([])
+  // A failed load must not look like "no conflicts"
+  const [periodBookingsCheck, setPeriodBookingsCheck] = useState<"loading" | "ok" | "error">("ok")
 
   // Add food truck dialog state
   const [addTruckDialog, setAddTruckDialog] = useState(false)
@@ -327,25 +330,30 @@ export default function AdminPage() {
     setBlockMode("day")
     setPeriodDates([])
     setPeriodBookings([])
+    setPeriodBookingsCheck("ok")
     setNewBlockedDate({ space: "", date: "", time_slot: "all_day", reason: "" })
   }
 
-  // Load bookings (wide window) once the period dialog is open and a space is chosen,
-  // so the calendar can flag days that already have bookings.
+  // Load bookings (wide window) once the block dialog is open and a space is chosen,
+  // so both modes can flag days that already have bookings.
   useEffect(() => {
-    if (!blockDateDialog || blockMode !== "period" || !newBlockedDate.space) {
+    if (!blockDateDialog || !newBlockedDate.space) {
       return
     }
     let cancelled = false
+    setPeriodBookingsCheck("loading")
     const start = startOfMonth(new Date())
     const end = addMonths(start, 18)
-    getBookingsForDateRange(start.toISOString(), end.toISOString()).then((res) => {
-      if (!cancelled && res.success) {
+    getBookingsForDateRange(start.toISOString(), end.toISOString())
+      .then((res) => {
+        if (cancelled) return
+        if (!res.success) return setPeriodBookingsCheck("error")
         setPeriodBookings(res.data || [])
-      }
-    })
+        setPeriodBookingsCheck("ok")
+      })
+      .catch(() => { if (!cancelled) setPeriodBookingsCheck("error") })
     return () => { cancelled = true }
-  }, [blockDateDialog, blockMode, newBlockedDate.space])
+  }, [blockDateDialog, newBlockedDate.space])
 
   // Seed the booking-rules editor from loaded rules
   useEffect(() => {
@@ -405,12 +413,13 @@ export default function AdminPage() {
     if (!newBlockedDate.space) return map
     for (const b of periodBookings) {
       if (String(b.space?.id ?? b.space) !== newBlockedDate.space) continue
-      if (!b.start) continue
-      const key = String(b.start).slice(0, 10)
-      ;(map[key] ||= []).push({
-        foodtruck: b.foodtruck?.name ?? "Okänd foodtruck",
-        space: b.space?.name ?? "Okänd plats",
-      })
+      // Start date, plus the next day for all-day blocks when the booking runs past midnight
+      for (const key of blockDatesOfBooking(b, newBlockedDate.time_slot)) {
+        ;(map[key] ||= []).push({
+          foodtruck: b.foodtruck?.name ?? "Okänd foodtruck",
+          space: b.space?.name ?? "Okänd plats",
+        })
+      }
     }
     return map
   })()
@@ -428,12 +437,21 @@ export default function AdminPage() {
       .map((d: any) => d.date)
   })()
 
+  // The space chosen in the block dialog, and whether the chosen slot type hits any of its passes
+  const selectedBlockSpace = spaces.find(s => String(s.id) === newBlockedDate.space)
+  const blockHasNoEffect = Boolean(
+    selectedBlockSpace &&
+    (selectedBlockSpace.time_slots ?? []).length > 0 &&
+    slotsCoveredByBlock(selectedBlockSpace.time_slots, newBlockedDate.time_slot).length === 0
+  )
+  // Bookings the single-day block would land on
+  const dayBlockConflicts = newBlockedDate.space && newBlockedDate.date
+    ? bookingsUnderBlock(periodBookings, newBlockedDate.space, [newBlockedDate.date], newBlockedDate.time_slot)
+    : []
+
   // Parse date/hour straight from the stored string (e.g. "2026-06-29T10:00:00") so we never
   // shift across midnight via the local timezone — same approach as createBooking() in actions.ts.
   const dateOf = (start: string): string => start.slice(0, 10)
-  // morning: starts before 16:00, evening: 16:00 onwards (matches available-slots-dialog)
-  const slotOf = (start: string): "morning" | "evening" =>
-    parseInt(start.slice(11, 13), 10) < 16 ? "morning" : "evening"
 
   // Full food-truck info (image, owner, description) keyed by id — reused for the schedule thumbnails/preview
   const foodTruckById = (() => {
@@ -444,7 +462,7 @@ export default function AdminPage() {
 
   // Schedule grouped by date → sorted by space → sorted by slot, honoring the from/to/space filters.
   const scheduleByDate = (() => {
-    const groups: Record<string, { foodtruck: string; foodtruckId: string; space: string; slot: "morning" | "evening"; start: string }[]> = {}
+    const groups: Record<string, { foodtruck: string; foodtruckId: string; space: string; kind: "morning" | "evening" | "full"; time: string; start: string }[]> = {}
     for (const b of scheduleBookings) {
       if (!b.start) continue
       const dateKey = dateOf(b.start)
@@ -456,7 +474,10 @@ export default function AdminPage() {
         foodtruck: b.foodtruck?.name ?? "Okänd foodtruck",
         foodtruckId: String(b.foodtruck?.id ?? b.foodtruck ?? ""),
         space: b.space?.name ?? "Okänd plats",
-        slot: slotOf(b.start),
+        // The booking's own start/end, not a fixed "Morgon/Lunch (06–15)" — spaces may have
+        // a single 10:00–03:00 pass (since 2026-01) that the old label misreported as morning.
+        kind: slotKind(b.start, b.end),
+        time: shortTimeRange(b.start, b.end),
         start: b.start,
       })
     }
@@ -465,7 +486,7 @@ export default function AdminPage() {
       .map(([date, items]) => ({
         date,
         items: items.sort(
-          (a, b) => a.space.localeCompare(b.space, "sv") || a.slot.localeCompare(b.slot)
+          (a, b) => a.space.localeCompare(b.space, "sv") || a.start.localeCompare(b.start)
         ),
       }))
   })()
@@ -584,8 +605,8 @@ export default function AdminPage() {
 
   const formatTimeSlot = (slot: string) => {
     switch (slot) {
-      case "morning": return "Morgon/Lunch (06-15)"
-      case "evening": return "Kväll (16-03)"
+      case "morning": return "Pass som börjar före 16"
+      case "evening": return "Pass som börjar 16 eller senare"
       case "all_day": return "Hela dagen"
       default: return slot
     }
@@ -738,7 +759,8 @@ export default function AdminPage() {
                                       onClick={() => setScheduleDetail({
                                         date,
                                         space: item.space,
-                                        slot: item.slot,
+                                        kind: item.kind,
+                                        time: item.time,
                                         foodtruckId: item.foodtruckId,
                                         foodtruckName: item.foodtruck,
                                       })}
@@ -766,13 +788,15 @@ export default function AdminPage() {
                                       <span
                                         className={cn(
                                           "inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full shrink-0",
-                                          item.slot === "morning"
+                                          item.kind === "morning"
                                             ? "bg-amber-100 text-amber-700"
-                                            : "bg-indigo-100 text-indigo-700"
+                                            : item.kind === "evening"
+                                              ? "bg-indigo-100 text-indigo-700"
+                                              : "bg-slate-100 text-slate-700"
                                         )}
                                       >
-                                        {item.slot === "morning" ? <Sun size={12} /> : <Moon size={12} />}
-                                        <span className="hidden sm:inline">{item.slot === "morning" ? "Morgon/Lunch" : "Kväll"}</span>
+                                        {item.kind === "morning" ? <Sun size={12} /> : item.kind === "evening" ? <Moon size={12} /> : <Clock size={12} />}
+                                        <span>{item.time}</span>
                                       </span>
                                     </button>
                                   )
@@ -1210,7 +1234,14 @@ export default function AdminPage() {
               height: "auto",
               translate: "none",
               transform: "translateX(-50%)",
-            } : undefined}
+            } : {
+              // Day mode grows with the warnings; keep it on screen and scroll the middle
+              maxHeight: "92vh",
+              translate: "none",
+              transform: "translate(-50%,-50%)",
+              display: "flex",
+              flexDirection: "column",
+            }}
           >
             <DialogHeader>
               <DialogTitle>Spärra datum</DialogTitle>
@@ -1260,6 +1291,15 @@ export default function AdminPage() {
             </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-1 px-1 -mx-1">
+              {newBlockedDate.space && periodBookingsCheck === "loading" && (
+                <p className="text-xs text-muted-foreground">Kontrollerar bokningar på platsen…</p>
+              )}
+              {newBlockedDate.space && periodBookingsCheck === "error" && (
+                <div className="rounded-md border border-red-300 bg-red-50 p-3 text-xs text-red-900">
+                  Kunde inte kontrollera bokningarna, så det går inte att se om spärren krockar med någon.
+                  Stäng och öppna igen, eller logga in på nytt.
+                </div>
+              )}
               {blockMode === "day" && (
                 <div className="space-y-2">
                   <Label htmlFor="date">Datum</Label>
@@ -1269,6 +1309,21 @@ export default function AdminPage() {
                     value={newBlockedDate.date}
                     onChange={(e) => setNewBlockedDate(prev => ({ ...prev, date: e.target.value }))}
                   />
+                  {dayBlockConflicts.length > 0 && (
+                    <div className="rounded-md border border-amber-400 bg-amber-50 p-3 text-xs text-amber-950">
+                      <p className="font-semibold">Dagen har redan en bokning på den tiden.</p>
+                      <p className="mt-1">
+                        Spärren tar inte bort bokningen, den ligger kvar. Kontakta foodtrucken:{" "}
+                        {dayBlockConflicts.map(b => {
+                          // A booking from the day before that runs past midnight
+                          const from = b.start.slice(0, 10) !== newBlockedDate.date
+                            ? `från ${format(new Date(b.start.slice(0, 10) + "T12:00:00"), "d MMM", { locale: sv })} `
+                            : ""
+                          return `${b.foodtruck?.name ?? "Okänd foodtruck"} (${from}${shortTimeRange(b.start, b.end)})`
+                        }).join(", ")}
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1281,9 +1336,26 @@ export default function AdminPage() {
                   onChange={(e) => setNewBlockedDate(prev => ({ ...prev, time_slot: e.target.value as any }))}
                 >
                   <option value="all_day">Hela dagen</option>
-                  <option value="morning">Morgon/Lunch (06-15)</option>
-                  <option value="evening">Kväll (16-03)</option>
+                  <option value="morning">Pass som börjar före 16</option>
+                  <option value="evening">Pass som börjar 16 eller senare</option>
                 </select>
+                {selectedBlockSpace && (
+                  <p className="text-xs text-muted-foreground">
+                    Platsens pass:{" "}
+                    {(selectedBlockSpace.time_slots ?? []).length > 0
+                      ? (selectedBlockSpace.time_slots ?? []).map(s => shortTimeRange(s.start, s.end)).join(", ")
+                      : "inga"}
+                  </p>
+                )}
+                {blockHasNoEffect && (
+                  <div className="flex gap-2 rounded-md border border-red-300 bg-red-50 p-3 text-xs text-red-900">
+                    <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                    <p>
+                      {selectedBlockSpace?.name} har inget pass som den här spärren träffar, så den skulle inte
+                      stoppa några bokningar. Välj <strong>Hela dagen</strong> eller ändra platsens pass först.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -1354,13 +1426,13 @@ export default function AdminPage() {
                 Avbryt
               </Button>
               {blockMode === "day" ? (
-                <Button onClick={handleCreateBlockedDate} disabled={!newBlockedDate.space || !newBlockedDate.date}>
+                <Button onClick={handleCreateBlockedDate} disabled={!newBlockedDate.space || !newBlockedDate.date || blockHasNoEffect || periodBookingsCheck === "loading"}>
                   Spärra
                 </Button>
               ) : (
                 <Button
                   onClick={handleCreateBlockedPeriod}
-                  disabled={!newBlockedDate.space || periodDates.length === 0 || savingBlock}
+                  disabled={!newBlockedDate.space || periodDates.length === 0 || savingBlock || blockHasNoEffect || periodBookingsCheck === "loading"}
                 >
                   {savingBlock
                     ? "Sparar…"
@@ -1625,10 +1697,12 @@ export default function AdminPage() {
                         <span>{scheduleDetail.space}</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        {scheduleDetail.slot === "morning"
+                        {scheduleDetail.kind === "morning"
                           ? <Sun size={15} className="text-amber-600 shrink-0" />
-                          : <Moon size={15} className="text-indigo-600 shrink-0" />}
-                        <span>{scheduleDetail.slot === "morning" ? "Morgon/Lunch (06–15)" : "Kväll (16–03)"}</span>
+                          : scheduleDetail.kind === "evening"
+                            ? <Moon size={15} className="text-indigo-600 shrink-0" />
+                            : <Clock size={15} className="text-slate-600 shrink-0" />}
+                        <span>{scheduleDetail.time}</span>
                       </div>
                     </div>
 
@@ -1671,6 +1745,7 @@ export default function AdminPage() {
           open={spaceDialog.open}
           onOpenChange={(open) => setSpaceDialog(prev => ({ ...prev, open }))}
           space={spaceDialog.space}
+          blockedDates={blockedDates}
           onSaved={loadData}
         />
 
