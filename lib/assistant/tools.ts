@@ -16,7 +16,7 @@ export type ToolContext = { token: string; userId: string; prompt: string }
 
 /** Shown to the user under the chat; the model gets `forModel`. */
 export type UiEvent =
-  | { type: "proposal"; id: string; card: Card; proposal: Proposal }
+  | { type: "proposal"; id: string; card: Card; proposal: Proposal; message?: string }
   | { type: "space_choice"; question: string; candidates: SpaceCandidate[] }
 
 export type ToolResult = { forModel: string; ui?: UiEvent; endsTurn?: boolean }
@@ -94,10 +94,23 @@ const slotsSchema = {
   description: "Pass, t.ex. [{start:'10:00', end:'03:00'}]. Slut före start = över midnatt.",
   items: { type: "object", properties: { start: str("HH:MM"), end: str("HH:MM"), description: str("valfri") }, required: ["start", "end"] },
 }
-const fn = (name: string, description: string, properties: Record<string, unknown>, required: string[] = []): ToolDef => ({
-  type: "function",
-  function: { name, description, parameters: { type: "object", properties, required, additionalProperties: false } },
-})
+// Every propose_ tool carries the sentence shown next to the card (DeepSeek sends tool calls without text)
+const MESSAGE = { type: "string", description: "En mening till användaren som visas vid kortet. Säg om förslaget avviker från det hen bad om, och varför." }
+const fn = (name: string, description: string, properties: Record<string, unknown>, required: string[] = []): ToolDef => {
+  const propose = name.startsWith("propose_")
+  return {
+    type: "function",
+    function: {
+      name, description,
+      parameters: {
+        type: "object",
+        properties: propose ? { message: MESSAGE, ...properties } : properties,
+        required: propose ? ["message", ...required] : required,
+        additionalProperties: false,
+      },
+    },
+  }
+}
 
 export const TOOLS: ToolDef[] = [
   fn("find_space", "Hitta platser utifrån en lös fras ('vid stortorget', 'sanddynevägen'). Söker namn, smeknamn, adress, beskrivning och geokodar frasen om inget träffar. Returnerar kandidater med metadata.", { query: str("frasen som användaren skrev") }, ["query"]),
@@ -115,7 +128,7 @@ export const TOOLS: ToolDef[] = [
     space_ids: { type: "array", items: { type: "integer" } },
     from: date("första dagen"), to: date("sista dagen, samma som from för en dag"),
     time_slot: { type: "string", enum: ["all_day", "morning", "evening"], description: "all_day om inget annat sägs; morning = pass som börjar före 16, evening = 16 eller senare" },
-    reason: str("orsak, kort"),
+    reason: str("orsaken som användaren angav; utelämna om hen inte sa någon, hitta aldrig på"),
   }, ["space_ids", "from", "to", "time_slot"]),
   fn("propose_unblock", "Föreslå att spärrar tas bort (id från list_blocks). Avslutar din tur.", { block_ids: { type: "array", items: { type: "integer" } } }, ["block_ids"]),
   fn("propose_update_space", "Föreslå ändring av en plats: namn, beskrivning, pass eller säsong. Ange bara det som ändras. null för säsong = ingen gräns. Avslutar din tur.", {
@@ -368,7 +381,8 @@ export async function runTool(name: string, rawArgs: string, ctx: ToolContext, g
       const summary = card.stopped
         ? `Kortet visas men kan inte bekräftas: ${card.warnings.filter((w) => w.severity === "stopp").map((w) => w.text).join(" ")}`
         : `Kortet visas för användaren${card.warnings.length ? ` med ${card.warnings.length} varning(ar)` : ""}. Vänta på Bekräfta/Avbryt.`
-      return { forModel: summary, ui: { type: "proposal", id, card, proposal }, endsTurn: true }
+      const message = typeof a.message === "string" && a.message.trim() ? a.message.trim().slice(0, 400) : undefined
+      return { forModel: summary, ui: { type: "proposal", id, card, proposal, ...(message ? { message } : {}) }, endsTurn: true }
     }
     return { forModel: `Fel: okänt verktyg ${name}.` }
   } catch (err) {

@@ -72,7 +72,8 @@ export function AdminAssistant() {
 
   if (!enabled) return null
 
-  async function send(text: string, display?: string) {
+  /** display: the bubble text; null = send without a bubble (automatic follow-ups) */
+  async function send(text: string, display?: string | null) {
     const t = text.trim()
     if (!t || busy) return
     setError("")
@@ -80,7 +81,7 @@ export function AdminAssistant() {
     const content = [...pendingNotes, t].join("\n")
     notes.current = []
     const next: Msg[] = [...history, { role: "user", content }]
-    setItems((prev) => [...prev, { kind: "text", role: "user", text: display ?? visible(t) }])
+    if (display !== null) setItems((prev) => [...prev, { kind: "text", role: "user", text: display ?? visible(t) }])
     setInput("")
     setBusy(true)
     try {
@@ -93,13 +94,15 @@ export function AdminAssistant() {
       if (!res.ok) throw new Error(data.error || "Något gick fel.")
       const newMsgs: Msg[] = data.messages.slice(next.length)
       setHistory(data.messages)
-      // Texts on the way, then the cards, then the closing line
+      // Texts on the way, then the explanation, then the cards
       const texts = newMsgs.flatMap((m) => (m.role === "assistant" && m.content?.trim() ? [m.content.trim()] : []))
-      const closing = data.events.length ? texts.pop() : undefined
+      let closing = data.events.length ? texts.pop() : undefined
+      // Don't repeat the space card's own question under it
+      if (closing && data.events.some((e: UiEvent) => e.type === "space_choice" && e.question.trim() === closing)) closing = undefined
       const added: Item[] = [
         ...texts.map((text): Item => ({ kind: "text", role: "assistant", text })),
-        ...data.events.map((event: UiEvent, i: number): Item => ({ kind: "event", event, key: `${Date.now()}-${i}` })),
         ...(closing ? [{ kind: "text", role: "assistant", text: closing } as Item] : []),
+        ...data.events.map((event: UiEvent, i: number): Item => ({ kind: "event", event, key: `${Date.now()}-${i}` })),
       ]
       setItems((prev) => [...prev, ...added])
     } catch (e) {
@@ -174,7 +177,11 @@ export function AdminAssistant() {
                 <ProposalCard
                   key={it.key}
                   event={it.event}
-                  onDone={(note) => notes.current.push(note)}
+                  onDone={(note) => {
+                    // Tell the assistant how it went, so it can wrap up or offer the next step
+                    notes.current.push(note)
+                    send("(Fortsätt: säg kort vad som hände och erbjud nästa steg om det finns ett.)", null)
+                  }}
                 />
               )
             )}
@@ -331,8 +338,11 @@ function ProposalCard({
       }
       if (!res.ok || data.ok === false) {
         const message = data.error || data.message || "Något gick fel."
-        setState({ status: res.status === 400 ? "open" : "failed", message })
-        if (res.status !== 400) onDone(`(Kortet "${card.title}" misslyckades: ${message})`)
+        // Handled = the server took the card (409/410) or tried to run it (500 / ok:false).
+        // Anything else (login, rate limit, bad input) leaves the card open to try again.
+        const handled = res.status === 409 || res.status === 410 || res.status === 500 || data.ok === false
+        setState({ status: handled ? "failed" : "open", message })
+        if (handled) onDone(`(Kortet "${card.title}" misslyckades: ${message})`)
         return
       }
       setState({ status: action === "cancel" ? "cancelled" : "done", message: data.message })

@@ -29,8 +29,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: msg }, { status: 400 })
   }
 
-  const lastUser = [...messages].reverse().find((m) => m.role === "user") as { content: string }
-  const ctx = { token: g.token, userId: g.userId, prompt: lastUser.content.slice(0, 2000) }
+  // The log keeps what the user asked in this conversation, not just the last click
+  const asked = messages
+    .filter((m): m is { role: "user"; content: string } => m.role === "user")
+    .map((m) => m.content.replace(/^\[Idag:[^\]]*\]\n/, ""))
+    .join("\n")
+  const ctx = { token: g.token, userId: g.userId, prompt: asked.slice(-2000) }
   // One snapshot per request, loaded on the first tool call that needs data
   let snapshot: Promise<Snapshot> | null = null
   const getData = () => (snapshot ??= loadSnapshot(g.token))
@@ -56,7 +60,10 @@ export async function POST(req: Request) {
       if (ends) {
         // Close the turn with a visible line (and keep tool → user out of the history; Mistral refuses it)
         const last = events[events.length - 1]
-        const text = message.content?.trim() || (last?.type === "space_choice" ? last.question : "Här är mitt förslag. Kontrollera kortet och tryck Bekräfta eller Avbryt.")
+        const text =
+          message.content?.trim() ||
+          (last?.type === "space_choice" ? last.question : last?.message) ||
+          "Här är mitt förslag. Kontrollera kortet och tryck Bekräfta eller Avbryt."
         messages.push({ role: "assistant", content: text })
         break
       }

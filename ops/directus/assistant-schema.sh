@@ -51,7 +51,7 @@ echo "== $ENV ($URL) som $ME"
 
 # Every lookup either answers or stops the script (a failed call must never read as "finns")
 count() { local n; n=$(q "$1" "$2") || exit 1; [[ "$n" =~ ^[0-9]+$ ]] || { echo "FEL: oväntat svar från $1" >&2; exit 1; }; echo "$n"; }
-coll_exists()   { [ "$(count "/collections/$COLL" '[.data] | length' 2>/dev/null || echo 0)" != 0 ]; }
+coll_exists()   { [ "$(count "/collections" "[.data[] | select(.collection==\"$COLL\")] | length")" != 0 ]; }
 field_exists()  { [ "$(count "/fields/spaces" "[.data[] | select(.field==\"$1\")] | length")" != 0 ]; }
 policy_id()     { q "/policies?filter[name][_eq]=$(jq -rn --arg v "$POLICY_NAME" '$v|@uri')&fields=id" '.data[0].id // empty'; }
 role_id()       { q "/roles?filter[name][_eq]=$(jq -rn --arg v "$ROLE_NAME" '$v|@uri')&fields=id" '.data[0].id // empty'; }

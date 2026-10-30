@@ -160,6 +160,7 @@ export function analyzeImpact(p: Proposal, data: Snapshot): Card {
       if (p.reason) lines.push(`Orsak: ${p.reason}`)
       if (already.length) lines.push(`Redan spärrat, hoppas över: ${list(already)}`)
       lines.push(`Skapar ${total} ${total === 1 ? "spärr" : "spärrar"}.`)
+      if (total === 0) warnings.push({ severity: "stopp", text: "Allt är redan spärrat, så det finns inget att bekräfta." })
       card = { title: "Spärra datum", spaces: spaces.map(cardSpace) }
       break
     }
@@ -197,6 +198,7 @@ export function analyzeImpact(p: Proposal, data: Snapshot): Card {
         const from = c.bookable_from !== undefined ? c.bookable_from : s?.bookable_from
         const to = c.bookable_to !== undefined ? c.bookable_to : s?.bookable_to
         lines.push(`Säsong: ${seasonLabel(s?.bookable_from, s?.bookable_to)} → ${seasonLabel(from, to)}`)
+        if (to && to < data.today) warnings.push(warn("season-past"))
       }
       card = { title: `Ändra ${s?.name ?? "plats"}`, spaces: s ? [cardSpace(s)] : [] }
       break
@@ -209,6 +211,7 @@ export function analyzeImpact(p: Proposal, data: Snapshot): Card {
       if (p.description) lines.push(`Beskrivning: ${p.description}`)
       if (p.aliases?.length) lines.push(`Smeknamn: ${p.aliases.join(", ")}`)
       if (!matchesTemplate(p.time_slots)) warnings.push(warn("slots-off-template"))
+      if (p.bookable_to && p.bookable_to < data.today) warnings.push(warn("season-past"))
       card = { title: "Ny plats", point: { lng: p.lng, lat: p.lat } }
       break
     }

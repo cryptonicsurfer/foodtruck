@@ -64,6 +64,11 @@ test("kort: redan spärrade dagar hoppas över", () => {
     data({ blocks: [{ id: 9, space: 7, date: "2026-11-10", time_slot: "all_day" }] })
   )
   assert.match(c.lines.join("\n"), /Skapar 1 spärr\./)
+  const none = analyzeImpact(
+    { kind: "block", space_ids: [7], dates: ["2026-11-10"], time_slot: "all_day" },
+    data({ blocks: [{ id: 9, space: 7, date: "2026-11-10", time_slot: "all_day" }] })
+  )
+  assert.equal(none.stopped, true)
 })
 
 test("kort: passändring och foodtruckers", () => {
@@ -74,6 +79,12 @@ test("kort: passändring och foodtruckers", () => {
   const del = analyzeImpact({ kind: "delete_foodtrucker", foodtruck_id: 3, delete_user: true }, data())
   assert.equal(del.requireText, "bekräfta")
   assert.equal(del.warnings[0].rule, "delete-with-bookings")
+})
+
+test("kort: ny plats med säsong som redan passerat varnar", () => {
+  const c = analyzeImpact({ kind: "create_space", name: "Tullbron plats 1", lng: 12.494, lat: 56.903, time_slots: [{ start: "10:00", end: "03:00" }], bookable_from: "2026-06-01", bookable_to: "2026-08-31" }, data())
+  assert.deepEqual(c.warnings.map((w) => w.rule), ["season-past"])
+  assert.equal(c.stopped, false)
 })
 
 test("datum: intervall och etiketter", () => {

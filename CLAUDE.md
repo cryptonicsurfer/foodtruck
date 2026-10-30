@@ -89,6 +89,32 @@ app silently does nothing (see Gotchas).
 - Food trucks and spaces have many bookings
 - Each booking links one food truck to one space for a time period
 
+### Admin: assistant (`/admin` → "Assistent" button)
+
+Free-text chat for Head of Foodtruck: proposes blocks, unblocks, space edits, new
+spaces (geocoded via Nominatim), aliases, rule changes, new/deactivated/deleted
+foodtruckers — every change is a **confirm card**, nothing is written before
+Bekräfta. Spec: `specs/admin-assistent.md`. Code: `lib/assistant/*`,
+`components/admin-assistant.tsx`, routes `app/api/admin-assistant/{,confirm,status}`.
+- **Every route starts with `guard()`** (`lib/assistant/guard.ts`): kill switch
+  (`ASSISTANT_ENABLED=1`, else 404) → same-origin → logged in (renews an expired
+  access token once) → `hasAdminAccess()` (else 403; foodtruckers get 403) → per-user
+  hourly cap. A new assistant route without it is a bug.
+- **Changes run with the user's own token** at Bekräfta, so Directus' activity log
+  shows the person. The service account `foodtruck.agent@falkenberg.se`
+  (`ASSISTANT_DIRECTUS_TOKEN`) only writes the log `foodtruck_assistant_actions`;
+  Bekräfta claims a row atomically (`pending` → `confirming`), so a double click
+  can't run it twice. Confirm re-runs `analyzeImpact()`; if warnings changed, a new
+  card is shown and nothing runs.
+- **Rules live in `lib/foodtruck-policy.ts`** (plain data, `stopp`/`varning`). New
+  rules from Gata & trafik → edit there, `pnpm test`, deploy.
+- **Schema** (log collection, `spaces.address`, `spaces.aliases`, role/policy/user)
+  via `ops/directus/assistant-schema.sh <staging|prod> <status|apply|revert>` on the
+  VPS, with an admin static token in `~/.directus-admin-token-<env>`.
+- Model chain: TensorX DeepSeek (`LLM_*`) → Mistral fallback, plain `fetch` (no SDK).
+  The system prompt must stay identical between turns (prefix cache); today's date
+  rides on the user message.
+
 ### Admin: schedule / parking-officer overview (`/admin` → "Schema")
 
 Leftmost admin tab. A read-only roster so a parking officer (parkeringsvakt) can

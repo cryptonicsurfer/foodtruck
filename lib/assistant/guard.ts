@@ -51,19 +51,46 @@ export async function guard(req: Request, bucket: "chat" | "confirm" | "status")
   // Off → the feature doesn't exist (404, not 403)
   if (!assistantEnabled()) return deny(404, "Not found")
   if (!sameOrigin(req)) return deny(403, "Forbidden")
-  const token = (await cookies()).get("access_token")?.value
-  if (!token) return deny(401, "Inte inloggad")
-  let userId: string
+  const jar = await cookies()
+  let token = jar.get("access_token")?.value
+  if (!token && !jar.get("refresh_token")) return deny(401, "Inte inloggad")
+  let me: Awaited<ReturnType<typeof directusServer.getCurrentUserWithRole>> | null = null
   try {
-    const me = await directusServer.getCurrentUserWithRole(token)
-    userId = me.data.id
-    if (!(await hasAdminAccess(token, me.data.role?.name))) return deny(403, "Bara för Head of Foodtruck")
+    if (token) me = await directusServer.getCurrentUserWithRole(token)
   } catch {
-    return deny(401, "Inloggningen har gått ut. Logga in igen.")
+    me = null
   }
+  // The access token lives ~15 min; a chat can last longer. Renew once with the refresh token.
+  if (!me) {
+    token = await renew()
+    if (!token) return deny(401, "Inloggningen har gått ut. Ladda om sidan och logga in igen.")
+    try {
+      me = await directusServer.getCurrentUserWithRole(token)
+    } catch {
+      return deny(401, "Inloggningen har gått ut. Ladda om sidan och logga in igen.")
+    }
+  }
+  const userId = me.data.id
+  if (!(await hasAdminAccess(token!, me.data.role?.name))) return deny(403, "Bara för Head of Foodtruck")
   const limits = { chat: 30, confirm: 60, status: 120 }
   if (rateLimited(`${bucket}:${userId}`, limits[bucket])) {
     return deny(429, "Du har använt assistenten mycket den senaste timmen. Vänta en stund.")
   }
-  return { token, userId }
+  return { token: token!, userId }
+}
+
+/** Same cookies as the refreshToken server action in app/actions.ts. */
+async function renew(): Promise<string | undefined> {
+  const jar = await cookies()
+  const refresh = jar.get("refresh_token")?.value
+  if (!refresh) return undefined
+  try {
+    const { data } = await directusServer.refreshToken(refresh)
+    const opts = { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict" as const, path: "/", maxAge: 60 * 60 }
+    jar.set("access_token", data.access_token, opts)
+    jar.set("refresh_token", data.refresh_token, opts)
+    return data.access_token
+  } catch {
+    return undefined
+  }
 }

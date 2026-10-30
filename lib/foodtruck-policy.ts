@@ -32,6 +32,7 @@ export const POLICY = {
     { id: "slots-orphan-bookings", severity: "varning", text: "De nya passen passar inte alla kommande bokningar. Bokningarna ligger kvar med sina gamla tider." },
     { id: "slots-block-reach", severity: "varning", text: "Befintliga morgon- eller kvällsspärrar får en annan räckvidd med de nya passen." },
     { id: "slots-off-template", severity: "varning", text: "Passen avviker från mallen för nya platser." },
+    { id: "season-past", severity: "varning", text: "Säsongen har redan tagit slut, så platsen går inte att boka. Menade du nästa år?" },
     { id: "delete-with-bookings", severity: "varning", text: "Foodtrucken har kommande bokningar. Inaktivera i stället om den kan komma tillbaka." },
   ] satisfies PolicyRule[],
 } as const
