@@ -7,7 +7,8 @@
     "dev": "node scripts/copy-maplibre-worker.mjs && next dev --turbopack",
     "build": "node scripts/copy-maplibre-worker.mjs && next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "tsc -p tsconfig.test.json && node --test lib/*.test.ts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.6",

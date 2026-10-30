@@ -15,8 +15,11 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/use-toast"
 import { SpaceLocationPicker, type LatLng } from "@/components/space-location-picker"
-import { adminCreateSpace, adminUpdateSpace } from "@/app/actions"
-import { Plus, Trash2 } from "lucide-react"
+import { adminCreateSpace, adminUpdateSpace, getBookingsForDateRange } from "@/app/actions"
+import { bookingsOutsideSlots, blocksChangingReach, shortTimeRange } from "@/lib/booking-rules"
+import { Plus, Trash2, AlertTriangle } from "lucide-react"
+import { format, addMonths } from "date-fns"
+import { sv } from "date-fns/locale"
 
 interface SpaceTimeSlot {
   start: string // "HH:MM"
@@ -39,13 +42,15 @@ interface SpaceDialogProps {
   onOpenChange: (open: boolean) => void
   /** null = create mode */
   space: AdminSpace | null
+  /** All blocked dates (admin list) — used to warn when new passes make morning/evening blocks stop working */
+  blockedDates?: any[]
   onSaved: () => void
 }
 
 const hhmm = (t?: string) => (t ? t.slice(0, 5) : "")
 const hhmmss = (t: string) => (t.length === 5 ? `${t}:00` : t)
 
-export function SpaceDialog({ open, onOpenChange, space, onSaved }: SpaceDialogProps) {
+export function SpaceDialog({ open, onOpenChange, space, blockedDates = [], onSaved }: SpaceDialogProps) {
   const { toast } = useToast()
   const isEdit = !!space
 
@@ -57,6 +62,9 @@ export function SpaceDialog({ open, onOpenChange, space, onSaved }: SpaceDialogP
   const [from, setFrom] = useState("")
   const [to, setTo] = useState("")
   const [saving, setSaving] = useState(false)
+  const [futureBookings, setFutureBookings] = useState<any[]>([])
+  // A failed load must not look like "no conflicts"
+  const [bookingsCheck, setBookingsCheck] = useState<"loading" | "ok" | "error">("ok")
 
   // Seed form from the space whenever the dialog opens
   useEffect(() => {
@@ -78,6 +86,46 @@ export function SpaceDialog({ open, onOpenChange, space, onSaved }: SpaceDialogP
     setTo(t)
     setLimited(Boolean(f || t))
   }, [open, space])
+
+  // Edit mode: load this space's future bookings so a pass change can be checked against them
+  useEffect(() => {
+    setFutureBookings([])
+    setBookingsCheck("ok")
+    if (!open || !space) return
+    let cancelled = false
+    setBookingsCheck("loading")
+    const now = new Date()
+    getBookingsForDateRange(now.toISOString(), addMonths(now, 18).toISOString())
+      .then((res) => {
+        if (cancelled) return
+        if (!res.success) return setBookingsCheck("error")
+        setFutureBookings((res.data || []).filter((b: any) => String(b.space?.id ?? b.space) === String(space.id)))
+        setBookingsCheck("ok")
+      })
+      .catch(() => { if (!cancelled) setBookingsCheck("error") })
+    return () => { cancelled = true }
+  }, [open, space])
+
+  // What the edited passes would break: bookings that no longer match a pass, blocks that stop working
+  const today = format(new Date(), "yyyy-MM-dd")
+  const editedSlots = slots.filter((s) => s.start && s.end)
+  const slotsChanged = isEdit &&
+    JSON.stringify(editedSlots.map((s) => [s.start, s.end])) !==
+    JSON.stringify((space?.time_slots ?? []).map((s) => [hhmm(s.start), hhmm(s.end)]))
+  const orphanedBookings = slotsChanged ? bookingsOutsideSlots(futureBookings, editedSlots) : []
+  const reachChanges = slotsChanged
+    ? blocksChangingReach(
+        blockedDates.filter((b) => String(b.space?.id ?? b.space) === String(space?.id) && b.date >= today),
+        space?.time_slots,
+        editedSlots
+      )
+    : []
+  const listBlocks = (rs: typeof reachChanges) =>
+    rs.slice(0, 6).map(({ block: b }) => `${b.date}${b.reason ? ` (${b.reason})` : ""}`).join(", ") +
+    (rs.length > 6 ? ` och ${rs.length - 6} till` : "")
+  const deadBlocks = reachChanges.filter((r) => r.after === "none")
+  const narrowedBlocks = reachChanges.filter((r) => r.before === "all" && r.after === "some")
+  const wakingBlocks = reachChanges.filter((r) => r.before === "none")
 
   const updateSlot = (i: number, patch: Partial<SpaceTimeSlot>) =>
     setSlots((prev) => prev.map((s, idx) => (idx === i ? { ...s, ...patch } : s)))
@@ -217,11 +265,57 @@ export function SpaceDialog({ open, onOpenChange, space, onSaved }: SpaceDialogP
           </div>
         </div>
 
+        {slotsChanged && bookingsCheck === "loading" && (
+          <p className="text-xs text-muted-foreground">Kontrollerar framtida bokningar…</p>
+        )}
+        {slotsChanged && bookingsCheck === "error" && (
+          <div className="flex gap-2 rounded-md border border-red-300 bg-red-50 p-3 text-xs text-red-900">
+            <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+            <p>Kunde inte kontrollera bokningarna, så det går inte att se om de nya passen krockar med något. Stäng och öppna igen, eller logga in på nytt.</p>
+          </div>
+        )}
+        {(orphanedBookings.length > 0 || reachChanges.length > 0) && (
+          <div className="flex gap-2 rounded-md border border-amber-400 bg-amber-50 p-3 text-xs text-amber-950">
+            <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              {orphanedBookings.length > 0 && (
+                <p>
+                  <strong>{orphanedBookings.length} framtida {orphanedBookings.length === 1 ? "bokning passar" : "bokningar passar"} inte
+                  de nya passen</strong> och ligger kvar med sina gamla tider. Kontakta foodtruckarna:{" "}
+                  {orphanedBookings.slice(0, 6).map((b) =>
+                    `${b.foodtruck?.name ?? "Okänd"} ${format(new Date(b.start.slice(0, 10) + "T12:00:00"), "d MMM", { locale: sv })} (${shortTimeRange(b.start, b.end)})`
+                  ).join(", ")}
+                  {orphanedBookings.length > 6 ? ` och ${orphanedBookings.length - 6} till` : ""}.
+                </p>
+              )}
+              {deadBlocks.length > 0 && (
+                <p>
+                  <strong>{deadBlocks.length} {deadBlocks.length === 1 ? "spärr slutar" : "spärrar slutar"} gälla</strong>,
+                  eftersom de gäller morgon- eller kvällspass som platsen inte längre har: {listBlocks(deadBlocks)}.
+                  Lägg om dem som hela dagen.
+                </p>
+              )}
+              {narrowedBlocks.length > 0 && (
+                <p>
+                  <strong>{narrowedBlocks.length} {narrowedBlocks.length === 1 ? "spärr stänger" : "spärrar stänger"} inte
+                  längre hela dagen</strong>, bara passen före eller från 16, så resten av dagen blir bokningsbar: {listBlocks(narrowedBlocks)}. Lägg om dem som hela dagen om hela dagen ska vara stängd.
+                </p>
+              )}
+              {wakingBlocks.length > 0 && (
+                <p>
+                  <strong>{wakingBlocks.length} {wakingBlocks.length === 1 ? "gammal spärr börjar" : "gamla spärrar börjar"} gälla
+                  igen</strong> med de nya passen: {listBlocks(wakingBlocks)}. Ta bort dem om de inte längre behövs.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             Avbryt
           </Button>
-          <Button onClick={handleSave} disabled={saving || !name.trim()}>
+          <Button onClick={handleSave} disabled={saving || !name.trim() || (slotsChanged && bookingsCheck === "loading")}>
             {saving ? "Sparar…" : isEdit ? "Spara" : "Skapa"}
           </Button>
         </DialogFooter>
