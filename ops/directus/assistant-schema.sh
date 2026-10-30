@@ -38,19 +38,21 @@ AGENT_EMAIL=foodtruck.agent@falkenberg.se
 
 api() {  # api METHOD PATH [JSON] → body på stdout, avbryter vid fel
   local out code
-  out=$(curl -sS -w '\n%{http_code}' -X "$1" "$URL$2" -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' ${3:+-d "$3"})
+  out=$(curl -sSg -w '\n%{http_code}' -X "$1" "$URL$2" -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' ${3:+-d "$3"})
   code=${out##*$'\n'}; out=${out%$'\n'*}
   if [ "$code" -ge 300 ]; then echo "FEL $1 $2 → $code: $(echo "$out" | jq -c '.errors[0].message' 2>/dev/null || echo "$out")" >&2; return 1; fi
   echo "$out"
 }
-q() { api GET "$1" | jq -r "$2"; }
+q() { local body; body=$(api GET "$1") || exit 1; echo "$body" | jq -r "$2"; }
 
-# Vem kör? (ska vara en administratör)
-ME=$(q "/users/me?fields=email,role.name" '.data.email + " (" + .data.role.name + ")"')
+# Vem kör? (ska vara en administratör) — stoppar här om Directus inte svarar eller token är fel
+ME=$(q "/users/me?fields=email,role.name" '.data.email + " (" + .data.role.name + ")"') || exit 1
 echo "== $ENV ($URL) som $ME"
 
-coll_exists()   { [ "$(q "/collections?filter[collection][_eq]=$COLL" '.data | length')" != 0 ]; }
-field_exists()  { [ "$(q "/fields/spaces" "[.data[] | select(.field==\"$1\")] | length")" != 0 ]; }
+# Every lookup either answers or stops the script (a failed call must never read as "finns")
+count() { local n; n=$(q "$1" "$2") || exit 1; [[ "$n" =~ ^[0-9]+$ ]] || { echo "FEL: oväntat svar från $1" >&2; exit 1; }; echo "$n"; }
+coll_exists()   { [ "$(count "/collections/$COLL" '[.data] | length' 2>/dev/null || echo 0)" != 0 ]; }
+field_exists()  { [ "$(count "/fields/spaces" "[.data[] | select(.field==\"$1\")] | length")" != 0 ]; }
 policy_id()     { q "/policies?filter[name][_eq]=$(jq -rn --arg v "$POLICY_NAME" '$v|@uri')&fields=id" '.data[0].id // empty'; }
 role_id()       { q "/roles?filter[name][_eq]=$(jq -rn --arg v "$ROLE_NAME" '$v|@uri')&fields=id" '.data[0].id // empty'; }
 agent_id()      { q "/users?filter[email][_eq]=$AGENT_EMAIL&fields=id" '.data[0].id // empty'; }
