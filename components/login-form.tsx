@@ -14,6 +14,9 @@ export function LoginForm({
 }: React.ComponentProps<"form">) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  // Shown once Directus says the account has 2FA (INVALID_OTP without a code)
+  const [otp, setOtp] = useState("")
+  const [needsOtp, setNeedsOtp] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
   const router = useRouter()
@@ -27,7 +30,7 @@ export function LoginForm({
     console.log("Login attempt with email:", email)
 
     try {
-      await login(email, password)
+      await login(email, password, needsOtp ? otp : undefined)
       
       // Check if there's a saved redirect path
       let redirectPath = "/dashboard"
@@ -44,6 +47,11 @@ export function LoginForm({
       router.push(redirectPath)
     } catch (err) {
       console.error("Login error:", err)
+      const code = (err as { code?: string })?.code
+      if (code === "otp_required" || code === "invalid_otp") {
+        setNeedsOtp(true)
+        setOtp("")
+      }
       setError(err instanceof Error ? err.message : "An error occurred")
     } finally {
       setIsLoading(false)
@@ -144,6 +152,23 @@ export function LoginForm({
             required 
           />
         </div>
+        {needsOtp && (
+          <div className="grid gap-3">
+            <Label htmlFor="otp">Kod från autentiseringsappen</Label>
+            <Input
+              id="otp"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern="[0-9]*"
+              maxLength={6}
+              placeholder="123456"
+              value={otp}
+              onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
+              autoFocus
+              required
+            />
+          </div>
+        )}
         <Button type="submit" className="w-full" disabled={isLoading}>
           {isLoading ? "Logging in..." : "Login"}
         </Button>

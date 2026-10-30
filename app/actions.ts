@@ -2,16 +2,17 @@
 
 import { cookies } from 'next/headers'
 import { revalidatePath, revalidateTag } from 'next/cache'
-import { directusServer } from '@/lib/directus-server'
+import { directusServer, DirectusLoginError } from '@/lib/directus-server'
 import { serverEnv } from '@/lib/env'
 import { slotTypeFromHour } from '@/lib/booking-rules'
 
 /**
- * Login with email and password
+ * Login with email and password, plus a one-time code for accounts with 2FA.
+ * On failure, `code` tells the form what to do: "otp_required" → show the code field.
  */
-export async function login(email: string, password: string) {
+export async function login(email: string, password: string, otp?: string) {
   try {
-    const response = await directusServer.login(email, password)
+    const response = await directusServer.login(email, password, otp || undefined)
     
     // Set access token in a cookie
     const cookieStore = await cookies()
@@ -34,22 +35,24 @@ export async function login(email: string, password: string) {
     return { success: true, data: response.data }
   } catch (error) {
     console.error('Login error:', error)
-    
-    // Provide a more user-friendly error message
-    let errorMessage = 'Failed to login';
-    
-    if (error instanceof Error) {
-      errorMessage = error.message;
-      
-      // Make login errors even more user-friendly
-      if (errorMessage.includes('401') || errorMessage.includes('Invalid credentials')) {
-        errorMessage = 'Invalid email or password';
-      } else if (errorMessage.includes('network') || errorMessage.includes('connection')) {
-        errorMessage = 'Unable to connect to the server. Please check your internet connection.';
+
+    if (error instanceof DirectusLoginError) {
+      switch (error.code) {
+        case 'INVALID_OTP':
+          // Directus sends the same code for a missing and a wrong code
+          return otp
+            ? { success: false, code: 'invalid_otp', error: 'Fel kod. Prova igen med en ny kod från din autentiseringsapp.' }
+            : { success: false, code: 'otp_required', error: 'Ange koden från din autentiseringsapp.' }
+        case 'INVALID_CREDENTIALS':
+          return { success: false, code: 'invalid_credentials', error: 'Fel e-post eller lösenord.' }
+        case 'REQUESTS_EXCEEDED':
+          return { success: false, code: 'rate_limited', error: 'För många försök. Vänta en stund och prova igen.' }
+        default:
+          return { success: false, code: 'failed', error: 'Inloggningen misslyckades. Prova igen.' }
       }
     }
-    
-    return { success: false, error: errorMessage }
+
+    return { success: false, code: 'failed', error: 'Kunde inte nå servern. Kontrollera anslutningen och prova igen.' }
   }
 }
 

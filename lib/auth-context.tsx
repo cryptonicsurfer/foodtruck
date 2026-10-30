@@ -21,7 +21,7 @@ interface AuthContextType {
   isLoading: boolean
   isAuthenticated: boolean
   isAdmin: boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string, otp?: string) => Promise<void>
   logout: () => Promise<void>
 }
 
@@ -77,14 +77,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, otp?: string) => {
     setIsLoading(true)
 
     try {
-      const result = await loginAction(email, password)
+      const result = await loginAction(email, password, otp)
 
       if (!result.success) {
-        throw new Error(result.error || "Login failed")
+        // Keep the server's code so the form can ask for a 2FA code
+        throw Object.assign(new Error(result.error || "Login failed"), { code: result.code })
       }
 
       // Get user data with role
