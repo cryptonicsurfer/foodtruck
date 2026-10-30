@@ -5,6 +5,7 @@ import { revalidatePath, revalidateTag } from 'next/cache'
 import { directusServer, DirectusLoginError } from '@/lib/directus-server'
 import { serverEnv } from '@/lib/env'
 import { slotTypeFromHour } from '@/lib/booking-rules'
+import { hasAdminAccess } from '@/lib/admin-access'
 
 /**
  * Login with email and password, plus a one-time code for accounts with 2FA.
@@ -679,25 +680,6 @@ export async function cancelBooking(bookingId: string) {
 // ============================================
 // Admin functions (Head of Foodtruck)
 // ============================================
-
-const ADMIN_ROLES = ['Administrator', 'Head of Foodtruck']
-// "Head of food truck spaces" — the policy behind Head of Foodtruck. Users whose
-// role belongs to another app (CRM, Destination) get it attached directly instead.
-const FOODTRUCK_ADMIN_POLICY_ID = '4160d6aa-eefe-4d9e-ac2b-c32ac66b83d1'
-
-/**
- * Admin = an admin role, or the foodtruck admin policy attached to the user.
- * Fails closed: if the policy lookup errors, the user is not admin.
- */
-async function hasAdminAccess(token: string, roleName?: string) {
-  if (ADMIN_ROLES.includes(roleName || '')) return true
-  try {
-    const policyIds = await directusServer.getCurrentUserPolicyIds(token)
-    return policyIds.includes(FOODTRUCK_ADMIN_POLICY_ID)
-  } catch {
-    return false
-  }
-}
 
 /**
  * Get current user with role - checks if user has admin access

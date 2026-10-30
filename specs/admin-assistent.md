@@ -1,7 +1,8 @@
 # Admin-assistent: fritext in, bekräftat kort ut
 
-Status (2026-10-30): **fas 1 punkt 3–4 byggd** (PR `feat/admin-impact-warnings`).
-Resten väntar på reglerna från Gata & trafik (de nya Head of Foodtruck), se fas 0.
+Status (2026-10-30): **fas 1 punkt 3–4 i drift** (#14). **Fas 2 v1 byggs** på
+`feat/admin-assistant` med dagens regler som policy v0; svaren från Gata & trafik
+(fas 0) ändrar bara `lib/foodtruck-policy.ts`. Fas 1 punkt 1–2 väntar på fas 0.
 
 **Grundkrav från Paul:** det ska vara så enkelt som möjligt för kollegorna. De säger
 "platsen vid sanddynevägen" eller "vid stortorget", inte namnet i databasen. De ska
@@ -119,6 +120,42 @@ direkt-SQL kräver en Directus-omstart = auth-avbrott i hela flottan). De är
 delad CMS-ändring, så Paul godkänner först.
 
 ## Fas 2 — agenten
+
+### v1 — det som byggs nu (beslut 2026-10-30)
+
+- **Bara Head of Foodtruck** (samma `hasAdminAccess()` som `/admin`). Foodtruckers
+  ser varken knappen eller når API:t.
+- **Ändringar körs med den inloggade personens token** vid Bekräfta, så Directus
+  aktivitetslogg och revisioner visar vem som gjorde vad och när, och varje ändring
+  går att återställa i Directus. Agenten har inga egna rättigheter på platser,
+  spärrar eller foodtruckers.
+- **Servicekontot `foodtruck.agent@falkenberg.se`** (död adress, inget lösenord, bara
+  statisk token i VPS-`.env`) har en egen roll och policy med create/read/update på
+  `foodtruck_assistant_actions` och inget annat, ingen app-åtkomst.
+- **Schemaändringar** (loggen, `spaces.address`, `spaces.aliases`, rollen och
+  policyn) görs med `ops/directus/assistant-schema.sh apply|revert` via Directus API:
+  först staging, sedan produktion. `revert` tar bort exakt det `apply` lade till.
+- **Avstängning utan deploy:** `ASSISTANT_ENABLED=1` i `.env` krävs; utan den svarar
+  API:t 404 och knappen syns inte. Byt värde och starta om containern.
+- **Utanför v1:** stängningsperioder (`space_closures`, väntar på fas 0),
+  avbokningar, borttagning av platser, Head of Foodtruck-konton.
+- **Nyckel:** tills vidare KW:s TensorX-nyckel (Paul 2026-10-30), byts mot en egen
+  foodtruck-nyckel före bred drift. Ingen `openai`-SDK: anropen går med `fetch` mot
+  det OpenAI-kompatibla API:t, så inget nytt beroende.
+
+**Endpoints efter v1**
+
+| Endpoint | Auth |
+|---|---|
+| `POST /api/admin-assistant` | admin: cookie-token + `hasAdminAccess()`, same-origin, 30 anrop/h/användare, max 8 verktygssteg/tur |
+| `POST /api/admin-assistant/confirm` | admin: som ovan + förslaget tillhör användaren, `pending`, < 10 min |
+| `GET /api/admin-assistant/status` | admin: svarar bara `{enabled}` |
+
+Inga andra nya routes. Utan `ASSISTANT_ENABLED=1` svarar alla tre 404.
+
+**Logg och personuppgifter:** loggen innehåller fritexten, som kan innehålla namn och
+e-post. Den läses bara av Administrator i Directus. Rensning: rader äldre än 12
+månader tas bort (öppen fråga: kortare?).
 
 ### Modell
 
@@ -267,9 +304,11 @@ status och user, och utan update kan confirm-steget inte flytta raden från `pen
 `POST /api/admin-assistant/confirm {id}` gör följande:
 
 1. Kontrollerar att förslaget tillhör samma användare och är yngre än 10 minuter, och
-   **tar** det atomärt: en uppdatering `pending` → `confirmed` med filtret
-   `status = pending`. Ändrades ingen rad har någon annan (eller ett dubbelklick)
-   redan tagit det, och inget körs.
+   **tar** det: en uppdatering `pending` → `confirming` med filtret `status = pending`,
+   under ett lås per rad i processen (`withRowLock`). Directus uppdatering med filter
+   är inte atomär (läser först, skriver sedan; på staging lyckades upp till 7 av 20
+   samtidiga försök), så det är låset som hindrar dubbelkörning. Det räcker eftersom
+   appen är en container och en process; skalas den ut behövs ett lås i databasen.
 2. Kör `analyzeImpact()` igen. Har läget ändrats (någon har bokat under tiden) visas
    ett nytt kort, och inget körs.
 3. Kör ändringen via de befintliga admin-actions (`adminCreateSpaceBlockedDate` osv.)

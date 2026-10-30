@@ -339,6 +339,19 @@ export const directusServer = {
   /**
    * Get all spaces
    */
+  /** Every space with all fields (incl. address/aliases) — the admin assistant's view. */
+  async getAllSpaces(token: string) {
+    return directusRequest<{ data: any[] }>(
+      "/items/spaces?fields=*&sort=name&limit=-1",
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+  },
+
   async getSpaces(token: string) {
     return directusRequest<{ data: any[] }>(
       "/items/spaces?fields=*,time_slots.*",
@@ -753,7 +766,8 @@ export const directusServer = {
    */
   async createFoodTruckUser(data: {
     email: string;
-    password: string;
+    // Omitted by the admin assistant: the owner sets it via the password-reset mail
+    password?: string;
     first_name: string;
     last_name: string;
   }, token: string) {

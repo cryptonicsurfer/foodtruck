@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/lib/auth-context"
 import { ProtectedRoute } from "@/components/protected-route"
+import { AdminAssistant } from "@/components/admin-assistant"
 import { SidebarProvider } from "@/components/ui/sidebar"
 import { AppSidebar } from "@/components/app-sidebar"
 import { CustomSidebarTrigger } from "@/components/custom-sidebar-trigger"
@@ -1772,6 +1773,8 @@ export default function AdminPage() {
           loading={savingRules}
           onConfirm={handleSaveRules}
         />
+        {/* Shows itself only for admins when the assistant is switched on */}
+        <AdminAssistant onChanged={() => { loadData(); if (scheduleLoaded) loadSchedule(true) }} />
       </SidebarProvider>
     </ProtectedRoute>
   )
