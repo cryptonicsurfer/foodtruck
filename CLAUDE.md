@@ -54,6 +54,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   Johan = Destination Falkenberg) get the policy on their account instead — before
   2026-10-28 the app checked role name only and shut them out of `/admin` although
   Directus let them do everything. The policy lookup fails closed.
+  **The lookup needs two read permissions on the policy itself** (added 2026-11-04,
+  `directus_permissions` id 319 + 320): `directus_users.policies` and
+  `directus_access` (`id,user,policy`), both filtered to `$CURRENT_USER`. Directus'
+  minimal app permissions don't include them, and a forbidden field in `fields=` is
+  **silently dropped** (no 403) → empty list → "not admin", with nothing in the logs.
+  Helena and Johan were locked out 2026-10-28 → 11-04 because of this.
+  The lookup only sees policies attached **directly to the user**. Putting the policy
+  on another role (not named Head of Foodtruck) would not be detected.
 - **Who can create whom:** Head of Foodtruck (role or policy) creates Foodtruckers
   in the app (`/admin`) and in Directus, and new Head of Foodtruck users **only in
   Directus admin** (cms.businessfalkenberg.se → Users). The policy's create/update
