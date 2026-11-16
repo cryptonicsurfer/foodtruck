@@ -123,6 +123,28 @@ Bekräfta. Spec: `specs/admin-assistent.md`. Code: `lib/assistant/*`,
   The system prompt must stay identical between turns (prefix cache); today's date
   rides on the user message.
 
+### Public control page (`/idag`) + cancellation log
+
+Open page, no login, for police and parking officers: per space and day, which foodtruck
+is booked — and which bookings were **cancelled, and when** ("var bokad här, bokningen
+togs bort 28 juli 12:09"). Views per space and per foodtruck, search, "Närmast mig"
+(browser geolocation against `spaces.location`), map link. Hidden from search engines
+(robots meta + `X-Robots-Tag` in `next.config.ts`). Foodtruck names only, never owners.
+- Code: `app/idag/page.tsx`, `components/public-schedule.tsx`, pure logic + tests in
+  `lib/public-schedule.ts`, Directus access in `lib/public-data.ts`.
+- **Off unless `PUBLIC_SCHEDULE_ENABLED=1` and `PUBLIC_SCHEDULE_TOKEN` is set** (404,
+  and cancellations are not logged).
+- Reads go through the service account `foodtruck.public@falkenberg.se`, which can read
+  only named fields (no `foodtrucks.user`, no `directus_users`). Schema, role, policy,
+  account, address fill and history import: `ops/directus/public-schedule-schema.sh`.
+- **Cancellations are hard deletes**, so `cancelBooking()` reads the booking first and
+  writes it to `foodtruck_cancelled_bookings` after the delete. A booking deleted straight
+  in Directus admin is not logged. A failed log write never stops a cancellation.
+- If Directus can't be read the page shows an error, **never an empty list** — "no
+  booking" would be a false answer to an officer on site.
+- A pass running past midnight (10–03) shows under its start date, and under "today"
+  while it is still running.
+
 ### Admin: schedule / parking-officer overview (`/admin` → "Schema")
 
 Leftmost admin tab. A read-only roster so a parking officer (parkeringsvakt) can
