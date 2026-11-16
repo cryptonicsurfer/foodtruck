@@ -6,6 +6,7 @@ import { directusServer, DirectusLoginError } from '@/lib/directus-server'
 import { serverEnv } from '@/lib/env'
 import { slotTypeFromHour } from '@/lib/booking-rules'
 import { hasAdminAccess } from '@/lib/admin-access'
+import { snapshotBooking, logCancellation } from '@/lib/public-data'
 
 /**
  * Login with email and password, plus a one-time code for accounts with 2FA.
@@ -659,8 +660,11 @@ export async function cancelBooking(bookingId: string) {
 
     const userFoodTruck = userResult.data
 
-    // Delete the booking
+    // Delete the booking. It is read first and logged afterwards (lib/public-data.ts),
+    // so the public control page can show "was booked here, cancelled at …".
+    const snapshot = await snapshotBooking(bookingId)
     await directusServer.deleteBooking(bookingId, token)
+    await logCancellation(snapshot)
 
     // Revalidate booking data
     revalidateTag('bookings')

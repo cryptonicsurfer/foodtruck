@@ -13,6 +13,10 @@ const nextConfig: NextConfig = {
     directusUrl: process.env.NEXT_PUBLIC_DIRECTUS_URL,
     appUrl: process.env.NEXT_PUBLIC_APP_URL,
   },
+  // /idag is public but must stay out of search engines (the page also sets robots meta).
+  async headers() {
+    return [{ source: "/idag", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" }] }]
+  },
   images: {
     remotePatterns: [
       {
