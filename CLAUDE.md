@@ -144,6 +144,27 @@ togs bort 28 juli 12:09"). Views per space and per foodtruck, search, "Närmast 
   booking" would be a false answer to an officer on site.
 - A pass running past midnight (10–03) shows under its start date, and under "today"
   while it is still running.
+- **Live in prod since 2026-11-16** (PR #19). Rows created in prod Directus by the schema
+  script (not in git): policy "Foodtruck public schedule" `fdfc5d3d-75b6-4178-b5ec-1d5503c46740`,
+  role with the same name `f885d19f-39cb-42df-9256-55024517c556`, `directus_access`
+  `9382f770-99ec-4153-93c3-b6793a365ab7`, user `2388698b-266e-433b-9798-66061e7406b9`,
+  `directus_permissions` id **329–334** (read on spaces, foodtrucks, foodtruck_bookings,
+  space_blocked_dates; create + read on the log). No existing role, policy or permission
+  was changed. Undo: `public-schedule-schema.sh prod revert` (deletes the log too).
+- The account's token is in the VPS `.env` (`PUBLIC_SCHEDULE_TOKEN`) and in
+  `glsfbg:~/.foodtruck-public-token-prod` (600). New token: delete that file and run
+  `apply` again, then update `.env` and rebuild.
+- The log holds 250 imported rows from 2026 (`source = logg`, rebuilt from Directus'
+  activity log); rows written by the app have `source = app`. The page only shows
+  14 days back (`DAYS_BACK`), the older rows are there as a record.
+- `spaces.address` was filled in by hand 2026-11-16 (street from the coordinate). The
+  script's `addresses-apply` puts central spaces in "Skrea Strand" — check its
+  suggestions before saving them.
+- The script was run straight against prod: Directus staging was not running on glsfbg
+  (see bf-ops `ops/directus-staging.md` to bring it up).
+- **Not yet seen in prod:** a row with `source = app`, i.e. a real cancellation made in
+  the app by a foodtruck account. The read and the write were each tried with the
+  service account.
 
 ### Admin: schedule / parking-officer overview (`/admin` → "Schema")
 
