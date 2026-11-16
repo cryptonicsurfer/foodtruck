@@ -90,8 +90,8 @@ export function addDays(day: string, n: number): string {
   return d.toISOString().slice(0, 10)
 }
 
-/** The day to show: a valid `?d=` within [today − back, today + ahead], else today. */
-export const DAYS_BACK = 120
+/** The day to show: a valid `?d=` within [today − back, today + ahead], else today. Two weeks back is enough for a check on site; the page is open to anyone. */
+export const DAYS_BACK = 14
 export const DAYS_AHEAD = 60
 export function pickDay(param: string | undefined, today: string, back = DAYS_BACK, ahead = DAYS_AHEAD): string {
   if (!param || !/^\d{4}-\d{2}-\d{2}$/.test(param)) return today
