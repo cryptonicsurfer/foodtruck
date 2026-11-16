@@ -169,7 +169,7 @@ export function PublicSchedule({ day, today, dayLabel, prev, next, updated, spac
                       <p className="font-semibold leading-snug">{b.truck}</p>
                       <p className="text-sm">
                         <span className="tabular-nums">Bokad {b.time}</span>
-                        {b.sinceYesterday && " (sedan igår)"} · {isToday ? STATE_LABEL[b.state] : b.state === "done" ? "Avslutat" : "Kommande"}
+                        {b.sinceYesterday && " (sedan igår)"} · {b.state === "later" && !isToday ? "Kommande" : STATE_LABEL[b.state]}
                       </p>
                       {b.bookedAt && <p className="text-xs text-muted-foreground">Bokningen gjordes {b.bookedAt}</p>}
                     </div>
@@ -178,7 +178,7 @@ export function PublicSchedule({ day, today, dayLabel, prev, next, updated, spac
                 {s.cancelled.map((c) => (
                   <div key={c.id} className="rounded-lg border border-dashed border-amber-500/70 bg-amber-50 px-3 py-2 text-amber-950 dark:bg-amber-950/40 dark:text-amber-100">
                     <p className="text-sm">
-                      <span className="font-semibold">{c.truck}</span> var bokad här <span className="tabular-nums">{c.time}</span>, men <strong>bokningen togs bort {c.cancelledAt}</strong>.
+                      <span className="font-semibold">{c.truck}</span> var bokad här <span className="tabular-nums">{c.time}</span>{c.sinceYesterday && " (sedan igår)"}, men <strong>bokningen togs bort {c.cancelledAt}</strong>.
                     </p>
                     <p className="text-xs opacity-80">
                       {c.late ? "Avbokad mindre än 24 timmar före start. " : ""}{c.bookedAt ? `Bokningen gjordes ${c.bookedAt}.` : ""}
@@ -197,7 +197,7 @@ export function PublicSchedule({ day, today, dayLabel, prev, next, updated, spac
               <h2 className="font-semibold">{t.truck}</h2>
               <ul className="mt-2 space-y-1 text-sm">
                 {t.booked.map((b, i) => (
-                  <li key={`b${i}`}>Bokad på <strong>{b.space}</strong> <span className="tabular-nums">{b.time}</span>{isToday && b.state === "now" ? " · pågår nu" : ""}</li>
+                  <li key={`b${i}`}>Bokad på <strong>{b.space}</strong> <span className="tabular-nums">{b.time}</span>{b.state === "now" ? " · pågår nu" : ""}</li>
                 ))}
                 {t.booked.length === 0 && <li>Ingen gällande bokning den här dagen.</li>}
                 {t.cancelled.map((c, i) => (

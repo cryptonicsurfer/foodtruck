@@ -30,6 +30,7 @@ test("pickDay: ogiltigt eller utanför fönstret ger idag", () => {
   assert.equal(pickDay("i-morgon", "2026-11-16"), "2026-11-16")
   assert.equal(pickDay("2026-13-45", "2026-11-16"), "2026-11-16")
   assert.equal(pickDay("2020-01-01", "2026-11-16"), "2026-11-16")
+  assert.equal(pickDay("2026-11-31", "2026-11-16"), "2026-11-16") // finns inte, får inte bli 1 dec
   assert.equal(addDays("2026-03-01", -1), "2026-02-28")
 })
 
@@ -94,4 +95,23 @@ test("cancelledLate, distanceM, stamp", () => {
   assert.ok(d > 8 && d < 16, String(d))
   assert.equal(stamp(null), null)
   assert.equal(stamp("2026-11-14T10:59:26.792"), "14 nov. 11:59") // naiv Directus-tid = UTC
+})
+
+test("buildDay: avbokning av ett pass över midnatt syns efter midnatt, så länge passet skulle ha pågått", () => {
+  const fre = [{ id: 9, start: "2026-07-10T10:00:00", end: "2026-07-11T03:00:00", booked_at: "2026-07-01T08:00:00Z", cancelled_at: "2026-07-10T21:00:00Z", space: 4, foodtruck: truck(23, "Sweets") }]
+  const natt = buildDay("2026-07-11", "2026-07-11T01:00:00", spaces, [], fre)
+  assert.equal(natt[1].cancelled.length, 1)
+  assert.equal(natt[1].cancelled[0].sinceYesterday, true)
+  assert.equal(buildDay("2026-07-11", "2026-07-11T03:00:00", spaces, [], fre)[1].cancelled.length, 0)
+  assert.equal(buildDay("2026-07-10", "2026-07-11T01:00:00", spaces, [], fre)[1].cancelled[0].sinceYesterday, false)
+})
+
+test("buildDay: borttagen foodtruck behåller sitt namn i avbokningen", () => {
+  const rows = [
+    { id: 1, start: "2026-07-11T10:00:00", end: "2026-07-12T03:00:00", cancelled_at: "2026-07-11T07:50:00Z", space: 4, foodtruck: null, foodtruck_name: "Nedlagd Vagn" },
+    { id: 2, start: "2026-07-11T10:00:00", end: "2026-07-12T03:00:00", cancelled_at: "2026-07-11T07:40:00Z", space: 5, foodtruck: null, foodtruck_name: "Annan Vagn" },
+  ]
+  const day = buildDay("2026-07-11", "2026-07-11T12:00:00", spaces, [], rows)
+  assert.equal(day[1].cancelled[0].truck, "Nedlagd Vagn")
+  assert.deepEqual(byTruck(day).map((t) => t.truck), ["Annan Vagn", "Nedlagd Vagn"])
 })

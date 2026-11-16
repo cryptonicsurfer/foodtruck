@@ -28,6 +28,8 @@ export type RawCancelled = {
   cancelled_at: string
   space: Ref
   foodtruck: Ref
+  /** Name at the time of cancellation — survives if the foodtruck is deleted later. */
+  foodtruck_name?: string | null
 }
 
 export type DayBooking = {
@@ -49,6 +51,8 @@ export type DayCancelled = {
   time: string
   cancelledAt: string
   bookedAt: string | null
+  /** The pass started the day before and would still have been running now. */
+  sinceYesterday: boolean
   /** Cancelled less than 24 h before the pass started (or after it started). */
   late: boolean
 }
@@ -89,7 +93,9 @@ export function addDays(day: string, n: number): string {
 /** The day to show: a valid `?d=` within [today − back, today + ahead], else today. */
 export function pickDay(param: string | undefined, today: string, back = 120, ahead = 60): string {
   if (!param || !/^\d{4}-\d{2}-\d{2}$/.test(param)) return today
-  if (Number.isNaN(new Date(`${param}T12:00:00Z`).getTime())) return today
+  // "2026-11-31" parses (as 1 Dec) instead of failing, so require a round trip
+  const parsed = new Date(`${param}T12:00:00Z`)
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== param) return today
   if (param < addDays(today, -back) || param > addDays(today, ahead)) return today
   return param
 }
@@ -104,13 +110,18 @@ export function longDay(day: string): string {
 /** An instant → "6 nov. 14:32" in Swedish time; a naive Directus timestamp is read as UTC. */
 export function stamp(iso: string | null | undefined): string | null {
   if (!iso) return null
-  const d = new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : `${iso}Z`)
+  const d = new Date(withZone(iso))
   if (Number.isNaN(d.getTime())) return null
   return new Intl.DateTimeFormat("sv-SE", { timeZone: TZ, day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(d)
 }
 
+/** A Directus timestamp with an explicit zone; a naive one is UTC. */
+export function withZone(iso: string): string {
+  return /[zZ]$|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : `${iso}Z`
+}
+
 function instant(iso: string): number {
-  return new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : `${iso}Z`).getTime()
+  return new Date(withZone(iso)).getTime()
 }
 
 /** Was the booking cancelled less than 24 h before its start (Swedish wall clock)? */
@@ -136,6 +147,10 @@ export function buildDay(
 ): DaySpace[] {
   const today = nowLocal.slice(0, 10)
   const yesterday = addDays(day, -1)
+  // A pass that started yesterday and runs past midnight belongs to "today" until it ends.
+  // The same rule for bookings and for cancellations: at 01:00 an officer must see both.
+  const onDay = (x: { start: string; end?: string | null }) =>
+    x.start.slice(0, 10) === day || (day === today && x.start.slice(0, 10) === yesterday && Boolean(x.end) && x.end! > nowLocal)
 
   return spaces
     .map((s) => {
@@ -143,10 +158,7 @@ export function buildDay(
       const c = s.location?.coordinates
       const mine = bookings
         .filter((b) => idOf(b.space) === sid)
-        .filter((b) => {
-          if (b.start.slice(0, 10) === day) return true
-          return day === today && b.start.slice(0, 10) === yesterday && b.end > nowLocal
-        })
+        .filter(onDay)
         .sort((a, b) => a.start.localeCompare(b.start))
         .map((b): DayBooking => ({
           id: String(b.id),
@@ -159,13 +171,15 @@ export function buildDay(
           bookedAt: stamp(b.date_created),
         }))
       const gone = cancelled
-        .filter((x) => idOf(x.space) === sid && x.start.slice(0, 10) === day)
+        .filter((x) => idOf(x.space) === sid && onDay(x))
         .sort((a, b) => instant(b.cancelled_at) - instant(a.cancelled_at))
         .map((x): DayCancelled => ({
           id: String(x.id),
-          truck: nameOf(x.foodtruck),
-          truckId: idOf(x.foodtruck),
+          truck: x.foodtruck_name || nameOf(x.foodtruck),
+          // a deleted foodtruck has no id left: keep such rows apart by name
+          truckId: idOf(x.foodtruck) || `namn:${x.foodtruck_name ?? x.id}`,
           time: shortTimeRange(x.start, x.end),
+          sinceYesterday: x.start.slice(0, 10) !== day,
           cancelledAt: stamp(x.cancelled_at) ?? "okänd tid",
           bookedAt: stamp(x.booked_at),
           late: cancelledLate(x.start, x.cancelled_at),

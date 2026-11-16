@@ -84,6 +84,7 @@ checks() {
   [ -n "$at" ] || { echo "  (ingen token i $AGENT_TOKEN_FILE, hoppar över kontrollerna)"; return 0; }
   echo "  koll: bokningar       $(code "$at" "/items/foodtruck_bookings?limit=1&fields=id,start,foodtruck.name,space") (ska vara 200)"
   echo "  koll: platser         $(code "$at" "/items/spaces?limit=1&fields=id,name,location") (ska vara 200)"
+  echo "  koll: spärrar         $(code "$at" "/items/space_blocked_dates?limit=1&fields=id,date") (ska vara 200)"
   echo "  koll: avbokningslogg  $(code "$at" "/items/$COLL?limit=1") (ska vara 200)"
   echo "  koll: ägare via truck $(code "$at" "/items/foodtrucks?limit=1&fields=id,user") (ska vara 403)"
   echo "  koll: users           $(code "$at" "/users?limit=1&fields=email") (ska vara 403)"
@@ -113,41 +114,61 @@ apply() {
         { field: "source", type: "string", meta: { interface: "input", readonly: true, width: "half", note: "app = loggad av appen, logg = inläst ur Directus händelselogg" }, schema: { default_value: "app" } },
         { field: "foodtruck", type: "integer", meta: { interface: "select-dropdown-m2o", special: ["m2o"], width: "half" }, schema: { is_nullable: true } },
         { field: "space", type: "integer", meta: { interface: "select-dropdown-m2o", special: ["m2o"], width: "half" }, schema: { is_nullable: true } },
+        { field: "foodtruck_name", type: "string", meta: { interface: "input", readonly: true, width: "half", note: "Namnet vid avbokningen (finns kvar om foodtrucken tas bort)" }, schema: { is_nullable: true } },
+        { field: "space_name", type: "string", meta: { interface: "input", readonly: true, width: "half", note: "Namnet vid avbokningen (finns kvar om platsen tas bort)" }, schema: { is_nullable: true } },
         { field: "start", type: "dateTime", meta: { interface: "datetime", width: "half", note: "Svensk klocktid, som i foodtruck_bookings" }, schema: { is_nullable: false } },
         { field: "end", type: "dateTime", meta: { interface: "datetime", width: "half" }, schema: { is_nullable: true } },
         { field: "booked_at", type: "timestamp", meta: { interface: "datetime", readonly: true, width: "half" }, schema: { is_nullable: true } },
         { field: "cancelled_at", type: "timestamp", meta: { interface: "datetime", readonly: true, width: "half" }, schema: { is_nullable: false } }
       ] }')" >/dev/null
-    api POST /relations "$(jq -nc --arg c "$COLL" '{ collection: $c, field: "foodtruck", related_collection: "foodtrucks", schema: { on_delete: "SET NULL" } }')" >/dev/null
-    api POST /relations "$(jq -nc --arg c "$COLL" '{ collection: $c, field: "space", related_collection: "spaces", schema: { on_delete: "SET NULL" } }')" >/dev/null
     echo "  + avbokningsloggen $COLL"
   fi
+  # Varje del nedan kontrolleras för sig, så att apply kan köras om efter ett avbrott
+  # och då lägger till exakt det som saknas.
+  local rel
+  for rel in foodtruck:foodtrucks space:spaces; do
+    local n; lookup n "/relations/$COLL" "[.data[] | select(.field==\"${rel%%:*}\")] | length"
+    [ "$n" != 0 ] || { api POST /relations "$(jq -nc --arg c "$COLL" --arg f "${rel%%:*}" --arg r "${rel#*:}" '{ collection: $c, field: $f, related_collection: $r, schema: { on_delete: "SET NULL" } }')" >/dev/null; echo "  + relation $COLL.${rel%%:*}"; }
+  done
 
   policy_id
   if [ -z "$PID" ]; then
     PID=$(api POST /policies "$(jq -nc --arg n "$POLICY_NAME" '{ name: $n, icon: "visibility", description: "Publika kontrollsidan /idag: läser namngivna fält i platser, foodtrucks, bokningar och spärrar, skriver avbokningsloggen. Ingen app-åtkomst, inga personuppgifter.", app_access: false, admin_access: false, enforce_tfa: false }')" | jq -r .data.id)
-    local r c f
-    for r in "${READS[@]}"; do
-      c=${r%%:*}; f=${r#*:}
-      api POST /permissions "$(jq -nc --arg p "$PID" --arg c "$c" --arg f "$f" '{ policy: $p, collection: $c, action: "read", fields: ($f | split(",")), permissions: {}, validation: {} }')" >/dev/null
-    done
-    for action in create read; do
-      api POST /permissions "$(jq -nc --arg p "$PID" --arg c "$COLL" --arg a "$action" '{ policy: $p, collection: $c, action: $a, fields: ["*"], permissions: {}, validation: {} }')" >/dev/null
-    done
+    [ -n "$PID" ] && [ "$PID" != null ] || die "policyn skapades inte"
     echo "  + policy $POLICY_NAME"
   fi
+  ensure_perm() {  # ensure_perm COLLECTION ACTION FIELDS(komma-separerade)
+    local n; lookup n "/permissions?filter[policy][_eq]=$PID&filter[collection][_eq]=$1&filter[action][_eq]=$2&fields=id" '.data | length'
+    [ "$n" != 0 ] && return 0
+    api POST /permissions "$(jq -nc --arg p "$PID" --arg c "$1" --arg a "$2" --arg f "$3" '{ policy: $p, collection: $c, action: $a, fields: ($f | split(",")), permissions: {}, validation: {} }')" >/dev/null
+    echo "  + rättighet $1.$2"
+  }
+  local r
+  for r in "${READS[@]}"; do ensure_perm "${r%%:*}" read "${r#*:}"; done
+  ensure_perm "$COLL" create "*"; ensure_perm "$COLL" read "*"
+
   role_id
   if [ -z "$RID" ]; then
     RID=$(api POST /roles "$(jq -nc --arg n "$ROLE_NAME" '{ name: $n, icon: "visibility", description: "Servicekonto för foodtrucks publika kontrollsida" }')" | jq -r .data.id)
-    api POST /access "$(jq -nc --arg r "$RID" --arg p "$PID" '{ role: $r, policy: $p }')" >/dev/null
+    [ -n "$RID" ] && [ "$RID" != null ] || die "rollen skapades inte"
     echo "  + roll $ROLE_NAME"
   fi
+  local linked; lookup linked "/access?filter[role][_eq]=$RID&filter[policy][_eq]=$PID&fields=id" '.data | length'
+  [ "$linked" != 0 ] || { api POST /access "$(jq -nc --arg r "$RID" --arg p "$PID" '{ role: $r, policy: $p }')" >/dev/null; echo "  + rollen kopplad till policyn"; }
+
   agent_id
   if [ -z "$AID" ]; then
+    AID=$(api POST /users "$(jq -nc --arg e "$AGENT_EMAIL" --arg r "$RID" '{ email: $e, first_name: "Foodtruck", last_name: "Publik sida", role: $r, status: "active", description: "Servicekonto, inget lösenord. Läser bokningar för /idag och skriver avbokningsloggen." }')" | jq -r .data.id)
+    [ -n "$AID" ] && [ "$AID" != null ] || die "kontot skapades inte"
+    echo "  + användaren $AGENT_EMAIL"
+  fi
+  # Token sätts i ett eget steg: saknas filen (t.ex. efter ett avbrott) får kontot en ny.
+  if [ ! -s "$AGENT_TOKEN_FILE" ]; then
     local tok; tok=$(openssl rand -hex 32)
-    api POST /users "$(jq -nc --arg e "$AGENT_EMAIL" --arg r "$RID" --arg t "$tok" '{ email: $e, first_name: "Foodtruck", last_name: "Publik sida", role: $r, status: "active", token: $t, description: "Servicekonto, inget lösenord. Läser bokningar för /idag och skriver avbokningsloggen." }')" >/dev/null
-    install -m 600 /dev/null "$AGENT_TOKEN_FILE"; printf '%s' "$tok" > "$AGENT_TOKEN_FILE"
-    echo "  + användaren $AGENT_EMAIL (token i $AGENT_TOKEN_FILE)"
+    install -m 600 /dev/null "$AGENT_TOKEN_FILE"
+    api PATCH "/users/$AID" "$(jq -nc --arg t "$tok" '{ token: $t }')" >/dev/null || { rm -f "$AGENT_TOKEN_FILE"; die "kunde inte sätta token"; }
+    printf '%s' "$tok" > "$AGENT_TOKEN_FILE"
+    echo "  + ny token i $AGENT_TOKEN_FILE (en tidigare token för kontot gäller inte längre)"
   fi
 }
 
@@ -186,7 +207,8 @@ backfill() {
   local have; lookup have "/items/$COLL?filter[source][_eq]=logg&aggregate[count]=*" '.data[0].count'
   [ "$have" = 0 ] || die "$have inlästa rader finns redan (source=logg). Ta bort dem först om du vill läsa in igen."
   local n; n=$(jq 'length' "$file")
-  api POST "/items/$COLL?fields=id" "$(cat "$file")" >/dev/null
+  # source sätts alltid här, så att spärren ovan gäller vad filen än innehåller
+  api POST "/items/$COLL?fields=id" "$(jq -c 'map(. + { source: "logg" })' "$file")" >/dev/null
   echo "  + $n historiska avbokningar inlästa"
 }
 
