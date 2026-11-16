@@ -173,6 +173,14 @@ apply() {
 }
 
 revert() {
+  # Loggen går inte att återskapa: finns det rader krävs ett uttryckligt ja.
+  if coll_exists; then
+    local n; lookup n "/items/$COLL?aggregate[count]=*" '.data[0].count'
+    if [ "$n" != 0 ]; then
+      local svar; read -r -p "  revert raderar avbokningsloggen med $n rader i $ENV. Skriv 'radera' för att fortsätta: " svar
+      [ "$svar" = radera ] || die "avbrutet, inget ändrat"
+    fi
+  fi
   agent_id; [ -n "$AID" ] && { api DELETE "/users/$AID" >/dev/null || die "kunde inte ta bort kontot"; rm -f "$AGENT_TOKEN_FILE"; echo "  - konto"; }
   role_id; [ -n "$RID" ] && { api DELETE "/roles/$RID" >/dev/null || die "kunde inte ta bort rollen"; echo "  - roll"; }
   policy_id; [ -n "$PID" ] && { api DELETE "/policies/$PID" >/dev/null || die "kunde inte ta bort policyn"; echo "  - policy (och dess rättigheter)"; }

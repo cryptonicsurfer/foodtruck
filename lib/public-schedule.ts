@@ -91,7 +91,9 @@ export function addDays(day: string, n: number): string {
 }
 
 /** The day to show: a valid `?d=` within [today − back, today + ahead], else today. */
-export function pickDay(param: string | undefined, today: string, back = 120, ahead = 60): string {
+export const DAYS_BACK = 120
+export const DAYS_AHEAD = 60
+export function pickDay(param: string | undefined, today: string, back = DAYS_BACK, ahead = DAYS_AHEAD): string {
   if (!param || !/^\d{4}-\d{2}-\d{2}$/.test(param)) return today
   // "2026-11-31" parses (as 1 Dec) instead of failing, so require a round trip
   const parsed = new Date(`${param}T12:00:00Z`)
@@ -157,7 +159,9 @@ export function buildDay(
       const sid = String(s.id)
       const c = s.location?.coordinates
       const mine = bookings
-        .filter((b) => idOf(b.space) === sid)
+        // A booking whose foodtruck has been deleted (FK is SET NULL) entitles nobody:
+        // it is left out rather than shown as "Okänd foodtruck · Bokad".
+        .filter((b) => idOf(b.space) === sid && idOf(b.foodtruck) !== "")
         .filter(onDay)
         .sort((a, b) => a.start.localeCompare(b.start))
         .map((b): DayBooking => ({

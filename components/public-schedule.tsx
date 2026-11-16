@@ -16,6 +16,8 @@ type Props = {
   prev: string
   next: string
   updated: string
+  minDay: string
+  maxDay: string
   spaces: DaySpace[]
   trucks: TruckDay[]
   cancelledKnown: boolean
@@ -28,7 +30,7 @@ function metres(m: number): string {
   return m < 1000 ? `${Math.round(m / 5) * 5 || 5} m` : `${(m / 1000).toFixed(1).replace(".", ",")} km`
 }
 
-export function PublicSchedule({ day, today, dayLabel, prev, next, updated, spaces, trucks, cancelledKnown, assetsUrl }: Props) {
+export function PublicSchedule({ day, today, dayLabel, prev, next, updated, minDay, maxDay, spaces, trucks, cancelledKnown, assetsUrl }: Props) {
   const router = useRouter()
   const [view, setView] = useState<"spaces" | "trucks">("spaces")
   const [q, setQ] = useState("")
@@ -77,16 +79,20 @@ export function PublicSchedule({ day, today, dayLabel, prev, next, updated, spac
   return (
     <div>
       <nav aria-label="Välj dag" className="mb-3 flex items-center gap-2">
-        <Button asChild variant="outline" size="icon" aria-label="Föregående dag"><Link href={`/idag?d=${prev}`}><ChevronLeft /></Link></Button>
+        {day > minDay ? (
+          <Button asChild variant="outline" size="icon" aria-label="Föregående dag"><Link href={`/idag?d=${prev}`}><ChevronLeft /></Link></Button>
+        ) : <span className="size-9" aria-hidden />}
         <div className="min-w-0 flex-1 text-center">
           <p className="truncate text-lg font-semibold first-letter:uppercase">{isToday ? `Idag, ${dayLabel}` : dayLabel}</p>
         </div>
-        <Button asChild variant="outline" size="icon" aria-label="Nästa dag"><Link href={`/idag?d=${next}`}><ChevronRight /></Link></Button>
+        {day < maxDay ? (
+          <Button asChild variant="outline" size="icon" aria-label="Nästa dag"><Link href={`/idag?d=${next}`}><ChevronRight /></Link></Button>
+        ) : <span className="size-9" aria-hidden />}
       </nav>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <label className="sr-only" htmlFor="dag">Datum</label>
         <input
-          id="dag" type="date" value={day}
+          id="dag" type="date" value={day} min={minDay} max={maxDay}
           onChange={(e) => e.target.value && router.push(`/idag?d=${e.target.value}`)}
           className="h-9 rounded-md border bg-background px-2 text-sm"
         />
@@ -160,7 +166,6 @@ export function PublicSchedule({ day, today, dayLabel, prev, next, updated, spac
                 {s.bookings.map((b) => (
                   <div key={b.id} className={cn("flex items-center gap-3 rounded-lg border px-3 py-2", b.state === "now" && "border-emerald-600/50 bg-emerald-50 dark:bg-emerald-950/40")}>
                     {b.image ? (
-                      // eslint-disable-next-line @next/next/no-img-element
                       <img src={`${assetsUrl}/${b.image}?width=112&height=112&fit=cover`} alt="" width={56} height={56} className="size-14 shrink-0 rounded-md object-cover" />
                     ) : (
                       <div className="size-14 shrink-0 rounded-md bg-muted" aria-hidden />

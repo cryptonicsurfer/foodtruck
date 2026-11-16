@@ -10,7 +10,7 @@
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 import { loadDay, publicScheduleEnabled } from "@/lib/public-data"
-import { addDays, buildDay, byTruck, longDay, pickDay, stockholmLocal } from "@/lib/public-schedule"
+import { addDays, buildDay, byTruck, longDay, pickDay, stockholmLocal, DAYS_BACK, DAYS_AHEAD } from "@/lib/public-schedule"
 import { PublicSchedule } from "@/components/public-schedule"
 
 export const dynamic = "force-dynamic"
@@ -39,6 +39,8 @@ export default async function IdagPage({ searchParams }: { searchParams: Promise
       prev: addDays(day, -1),
       next: addDays(day, 1),
       updated: now.slice(11, 16),
+      minDay: addDays(today, -DAYS_BACK),
+      maxDay: addDays(today, DAYS_AHEAD),
       spaces,
       trucks: byTruck(spaces),
       cancelledKnown: data.cancelled !== null,
@@ -49,7 +51,7 @@ export default async function IdagPage({ searchParams }: { searchParams: Promise
   }
 
   return (
-    <main className="mx-auto min-h-screen max-w-2xl px-4 pb-16 pt-6">
+    <main lang="sv" className="mx-auto min-h-screen max-w-2xl px-4 pb-16 pt-6">
       <header className="mb-4">
         <p className="text-sm text-muted-foreground">Falkenbergs kommun · foodtruckplatser</p>
         <h1 className="text-2xl font-semibold leading-tight">Vem är bokad var?</h1>

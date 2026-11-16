@@ -71,6 +71,11 @@ test("buildDay: pass över midnatt syns efter midnatt, men bara idag och tills d
   assert.equal(bak[2].bookings[0].state, "done")
 })
 
+test("buildDay: bokning vars foodtruck är borttagen visas inte som bokad", () => {
+  const orphan = [{ id: 7, start: "2026-07-11T10:00:00", end: "2026-07-12T03:00:00", space: 4, foodtruck: null }]
+  assert.equal(buildDay("2026-07-11", "2026-07-11T12:00:00", spaces, orphan, [])[1].bookings.length, 0)
+})
+
 test("buildDay: spärrad plats", () => {
   const blocks = [{ space: 4, date: "2026-07-11", time_slot: "all_day", status: "published" }, { space: 5, date: "2026-07-11", time_slot: "evening", status: "published" }]
   const day = buildDay("2026-07-11", "2026-07-11T12:00:00", spaces, [], [], blocks)
